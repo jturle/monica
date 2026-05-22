@@ -9,18 +9,23 @@
   <body>
     <header id="topbar">
       <div class="brand">monica</div>
-      <div class="tabs">
-        <div class="tab active"><span id="tab-title">Tab 1</span></div>
-      </div>
+      <div class="tabs" id="tabs"></div>
       <input id="omnibox" placeholder="Enter URL and press Enter…" spellcheck="false" />
-      <div class="cdp" title="Chrome DevTools Protocol endpoint">CDP :9222</div>
+      <div class="cdp-group">
+        <span class="cdp" id="cdp-badge" title="Chrome DevTools Protocol endpoint">CDP :9222</span>
+        <div class="cdp-toggle" id="cdp-toggle" title="Re-bind CDP (restarts monica)">
+          <button data-mode="local" class="active">Local</button>
+          <button data-mode="lan">LAN</button>
+        </div>
+      </div>
     </header>
 
     <main id="stage"></main>
 
     <footer id="hint">
+      <kbd>⌘T</kbd> new tab · double-click a tab to rename ·
       <kbd>⌘D</kbd> split right · <kbd>⌘⇧D</kbd> split down · drag dividers to resize ·
-      <kbd>⌘W</kbd> close pane · click a pane to select
+      <kbd>⌘R</kbd> reload pane · <kbd>⌘W</kbd> close pane
     </footer>
 
     <script src="app.js"></script>

@@ -1,16 +1,44 @@
-const { app, BrowserWindow, Menu } = require("electron");
+const { app, BrowserWindow, Menu, ipcMain, dialog } = require("electron");
 const path = require("path");
+const fs = require("fs");
+const os = require("os");
+const proxy = require("./proxy");
 
-// --- CDP: one endpoint, every pane/webview shows up as an attachable target ---
-// Launch the whole app with remote debugging so agent-browser / Playwright /
-// chrome-devtools-mcp can attach to localhost:9222 and pick a target by id.
-app.commandLine.appendSwitch("remote-debugging-port", "9222");
-// Chromium 111+ blocks CDP websocket attach unless the origin is allow-listed.
-// Without this, `curl /json` works but external clients can't actually drive a target.
+const PUBLIC_PORT = proxy.PUBLIC_PORT; // 9222 — what clients/tunnels connect to
+const SETTINGS_FILE = path.join(app.getPath("userData"), "monica-settings.json");
+
+function readSettings() {
+  try { return JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf8")); } catch { return {}; }
+}
+function writeSettings(next) {
+  try { fs.writeFileSync(SETTINGS_FILE, JSON.stringify(next, null, 2)); } catch {}
+}
+function firstLanIPv4() {
+  const ifaces = os.networkInterfaces();
+  for (const name of Object.keys(ifaces)) {
+    for (const i of ifaces[name] || []) {
+      if (i.family === "IPv4" && !i.internal) return i.address;
+    }
+  }
+  return "0.0.0.0";
+}
+const addrFor = (mode) => (mode === "lan" ? "0.0.0.0" : "127.0.0.1");
+
+const settings = readSettings();
+let cdpMode = settings.cdpMode === "lan" ? "lan" : "local";
+
+// Real Chromium DevTools stays INTERNAL and local-only; the proxy owns the public
+// port and decides whether to expose it to the LAN.
+app.commandLine.appendSwitch("remote-debugging-port", "9223");
+app.commandLine.appendSwitch("remote-debugging-address", "127.0.0.1");
+// Chromium 111+ requires the connecting origin to be allow-listed; the proxy (and
+// the clients behind it) connect from arbitrary origins.
 app.commandLine.appendSwitch("remote-allow-origins", "*");
 
+let mainWindow = null;
+
 function createWindow() {
-  const win = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1440,
     height: 920,
     backgroundColor: "#0b0e14",
@@ -18,13 +46,70 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
-      // Panes are <webview> elements living in the DOM so tiling/resize is just CSS.
       webviewTag: true,
     },
   });
-  win.loadFile("renderer/index.html");
-  return win;
+  mainWindow.loadFile("renderer/index.html");
+  return mainWindow;
 }
+
+// ---- proxy <-> renderer bridge ---------------------------------------------
+
+let reqSeq = 0;
+const createResolvers = new Map();
+ipcMain.on("proxy:create-pane-result", (_e, { reqId, leafId }) => {
+  const resolve = createResolvers.get(reqId);
+  if (resolve) { createResolvers.delete(reqId); resolve(leafId); }
+});
+
+function createPaneInRenderer(connectionId, url) {
+  return new Promise((resolve) => {
+    const reqId = ++reqSeq;
+    createResolvers.set(reqId, resolve);
+    mainWindow?.webContents.send("proxy:create-pane", { connectionId, url, reqId });
+    setTimeout(() => {
+      if (createResolvers.has(reqId)) { createResolvers.delete(reqId); resolve(null); }
+    }, 10000);
+  });
+}
+
+const proxyHooks = {
+  onConnectionOpen: (connectionId, label) =>
+    mainWindow?.webContents.send("proxy:connection-open", { connectionId, label }),
+  onConnectionClose: (connectionId) =>
+    mainWindow?.webContents.send("proxy:connection-close", { connectionId }),
+  createPane: async (connectionId, url) => ({ leafId: await createPaneInRenderer(connectionId, url) }),
+  closePane: (leafId) => mainWindow?.webContents.send("proxy:close-pane", { leafId }),
+};
+
+// ---- CDP bind controls -----------------------------------------------------
+
+ipcMain.handle("cdp:get", () => ({ mode: cdpMode, port: PUBLIC_PORT, lanIp: firstLanIPv4() }));
+
+ipcMain.handle("cdp:set", async (e, requested) => {
+  const mode = requested === "lan" ? "lan" : "local";
+  if (mode === cdpMode) return { mode: cdpMode, port: PUBLIC_PORT, lanIp: firstLanIPv4() };
+  const lan = mode === "lan";
+  const { response } = await dialog.showMessageBox(BrowserWindow.fromWebContents(e.sender), {
+    type: lan ? "warning" : "question",
+    buttons: ["Cancel", lan ? "Expose on LAN" : "Switch to local"],
+    defaultId: lan ? 0 : 1,
+    cancelId: 0,
+    title: "Re-bind CDP endpoint",
+    message: lan ? "Expose CDP to your local network?" : "Switch CDP to local only?",
+    detail: lan
+      ? "The CDP endpoint will rebind to 0.0.0.0:" + PUBLIC_PORT +
+        " — reachable by ANY device on your network, which could fully drive your browsers. Only do this on a trusted network. (Active connections will drop.)"
+      : "The CDP endpoint will rebind to 127.0.0.1:" + PUBLIC_PORT + " (local only). Active connections will drop.",
+  });
+  if (response !== 1) return { mode: cdpMode, port: PUBLIC_PORT, lanIp: firstLanIPv4() };
+  cdpMode = mode;
+  writeSettings({ ...settings, cdpMode: mode });
+  await proxy.setBind(addrFor(mode)); // live rebind — no relaunch
+  return { mode: cdpMode, port: PUBLIC_PORT, lanIp: firstLanIPv4() };
+});
+
+// ---- menu ------------------------------------------------------------------
 
 function buildMenu() {
   const isMac = process.platform === "darwin";
@@ -34,35 +119,45 @@ function buildMenu() {
     ...(isMac ? [{ role: "appMenu" }] : []),
     { role: "editMenu" },
     {
-      label: "Pane",
+      label: "Tab",
       submenu: [
-        {
-          label: "Split Right (side-by-side)",
-          accelerator: "CmdOrCtrl+D",
-          click: (_i, win) => send(win, "split", "row"),
-        },
-        {
-          label: "Split Down (stacked)",
-          accelerator: "CmdOrCtrl+Shift+D",
-          click: (_i, win) => send(win, "split", "col"),
-        },
-        { type: "separator" },
-        {
-          label: "Close Pane",
-          accelerator: "CmdOrCtrl+W",
-          click: (_i, win) => send(win, "close-pane"),
-        },
+        { label: "New Tab", accelerator: "CmdOrCtrl+T", click: (_i, win) => send(win, "new-tab") },
+        { label: "Close Tab", accelerator: "CmdOrCtrl+Shift+W", click: (_i, win) => send(win, "close-tab") },
       ],
     },
-    { role: "viewMenu" },
+    {
+      label: "Pane",
+      submenu: [
+        { label: "Split Right (side-by-side)", accelerator: "CmdOrCtrl+D", click: (_i, win) => send(win, "split", "row") },
+        { label: "Split Down (stacked)", accelerator: "CmdOrCtrl+Shift+D", click: (_i, win) => send(win, "split", "col") },
+        { type: "separator" },
+        { label: "Reload Pane", accelerator: "CmdOrCtrl+R", click: (_i, win) => send(win, "reload-pane") },
+        { label: "Close Pane", accelerator: "CmdOrCtrl+W", click: (_i, win) => send(win, "close-pane") },
+      ],
+    },
+    {
+      label: "View",
+      submenu: [
+        { label: "Reload App", accelerator: "CmdOrCtrl+Shift+R", role: "forceReload" },
+        { role: "toggleDevTools" },
+        { type: "separator" },
+        { role: "resetZoom" }, { role: "zoomIn" }, { role: "zoomOut" },
+        { type: "separator" },
+        { role: "togglefullscreen" },
+      ],
+    },
   ];
-
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   buildMenu();
   createWindow();
+  try {
+    await proxy.start({ bindAddr: addrFor(cdpMode), hooks: proxyHooks });
+  } catch (err) {
+    dialog.showErrorBox("monica CDP proxy failed to start", String(err?.message || err));
+  }
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
