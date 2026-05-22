@@ -1,0 +1,13 @@
+{
+  "name": "monica",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Embedded multi-browser cockpit — tiling panes, each a CDP-attachable target",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^42.2.0"
+  }
+}

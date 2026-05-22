@@ -1,0 +1,148 @@
+:root {
+  --bg: #0b0e14;
+  --panel: #11151f;
+  --line: #1e2532;
+  --line-2: #2a3445;
+  --text: #c7d0df;
+  --muted: #6b7689;
+  --accent: #38e1c4;
+  --accent-dim: #1d6b60;
+  --gutter: 6px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  overflow: hidden;
+  user-select: none;
+}
+
+body { display: flex; flex-direction: column; }
+
+/* ---- top bar ---- */
+#topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 44px;
+  padding: 0 12px 0 84px; /* leave room for macOS traffic lights */
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  -webkit-app-region: drag;
+}
+#topbar .brand {
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: var(--accent);
+}
+#topbar .tabs { display: flex; gap: 6px; -webkit-app-region: no-drag; }
+#topbar .tab {
+  padding: 4px 14px;
+  border-radius: 7px;
+  background: #0d1018;
+  border: 1px solid var(--line-2);
+  color: var(--muted);
+  font-size: 12px;
+}
+#topbar .tab.active { color: var(--text); border-color: var(--accent-dim); }
+
+#omnibox {
+  flex: 1;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 7px;
+  background: #0d1018;
+  border: 1px solid var(--line-2);
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+  -webkit-app-region: no-drag;
+}
+#omnibox:focus { border-color: var(--accent-dim); }
+
+#topbar .cdp {
+  font-size: 11px;
+  color: var(--accent);
+  border: 1px solid var(--accent-dim);
+  border-radius: 6px;
+  padding: 3px 8px;
+  -webkit-app-region: no-drag;
+}
+
+/* ---- stage / panes ---- */
+#stage { position: relative; flex: 1; overflow: hidden; }
+
+.pane {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  background: #000;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px var(--line-2) inset;
+}
+.pane.selected { box-shadow: 0 0 0 2px var(--accent) inset; }
+
+.pane-chrome {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 8px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+.pane-chrome .dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--line-2);
+  flex: 0 0 auto;
+}
+.pane.selected .pane-chrome .dot { background: var(--accent); }
+.pane-chrome .ptitle { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }
+.pane-chrome .purl { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+.pane-chrome .pclose {
+  border: none; background: transparent; color: var(--muted);
+  cursor: pointer; font-size: 15px; line-height: 1; padding: 0 4px;
+}
+.pane-chrome .pclose:hover { color: #ff6b6b; }
+
+.pane webview { flex: 1; width: 100%; border: 0; background: #fff; }
+
+/* ---- dividers ---- */
+.divider { position: absolute; z-index: 5; background: transparent; }
+.divider:hover { background: var(--accent-dim); }
+.divider.row { cursor: col-resize; }
+.divider.col { cursor: row-resize; }
+
+/* While dragging a divider, let pointer events skip the webviews so the drag
+   keeps tracking even when the cursor passes over a guest page. */
+body.dragging { cursor: inherit; }
+body.dragging .pane webview { pointer-events: none; }
+
+/* ---- footer ---- */
+#hint {
+  height: 26px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+}
+#hint kbd {
+  background: #0d1018;
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-family: inherit;
+}
