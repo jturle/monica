@@ -27,6 +27,15 @@ const addrFor = (mode) => (mode === "lan" ? "0.0.0.0" : "127.0.0.1");
 const settings = readSettings();
 let cdpMode = settings.cdpMode === "lan" ? "lan" : "local";
 
+// --- debug log: written to the project dir (truncated each launch) so it's easy
+// to tail/inspect. Logs HTTP hits, CDP requests, connections, and pane/tab churn.
+const LOG_FILE = path.join(__dirname, "monica-debug.log");
+const logStream = fs.createWriteStream(LOG_FILE, { flags: "w" });
+function log(scope, ...parts) {
+  try { logStream.write(new Date().toISOString() + " [" + scope + "] " + parts.join(" ") + "\n"); } catch {}
+}
+log("app", "started; cdp mode=" + cdpMode);
+
 // Real Chromium DevTools stays INTERNAL and local-only; the proxy owns the public
 // port and decides whether to expose it to the LAN.
 app.commandLine.appendSwitch("remote-debugging-port", "9223");
@@ -76,6 +85,8 @@ function createPaneInRenderer(connectionId, url) {
 const proxyHooks = {
   onConnectionOpen: (connectionId, label) =>
     mainWindow?.webContents.send("proxy:connection-open", { connectionId, label }),
+  onConnectionLabel: (connectionId, label) =>
+    mainWindow?.webContents.send("proxy:connection-label", { connectionId, label }),
   onConnectionClose: (connectionId) =>
     mainWindow?.webContents.send("proxy:connection-close", { connectionId }),
   createPane: async (connectionId, url) => ({ leafId: await createPaneInRenderer(connectionId, url) }),
@@ -85,6 +96,7 @@ const proxyHooks = {
 // ---- CDP bind controls -----------------------------------------------------
 
 ipcMain.on("clipboard:write", (_e, text) => clipboard.writeText(String(text ?? "")));
+ipcMain.on("monica:log", (_e, scope, msg) => log(String(scope || "ui"), String(msg ?? "")));
 
 let quitDialogOpen = false;
 ipcMain.on("app:confirm-quit", async (e) => {
@@ -124,6 +136,7 @@ ipcMain.handle("cdp:set", async (e, requested) => {
   cdpMode = mode;
   writeSettings({ ...settings, cdpMode: mode });
   await proxy.setBind(addrFor(mode)); // live rebind — no relaunch
+  log("app", "cdp rebind -> " + mode);
   return { mode: cdpMode, port: PUBLIC_PORT, lanIp: firstLanIPv4() };
 });
 
@@ -175,7 +188,7 @@ app.whenReady().then(async () => {
   buildMenu();
   createWindow();
   try {
-    await proxy.start({ bindAddr: addrFor(cdpMode), hooks: proxyHooks });
+    await proxy.start({ bindAddr: addrFor(cdpMode), hooks: proxyHooks, log });
   } catch (err) {
     dialog.showErrorBox("monica CDP proxy failed to start", String(err?.message || err));
   }

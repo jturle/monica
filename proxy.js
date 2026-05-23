@@ -26,6 +26,7 @@ let httpServer = null;
 let wss = null;
 let bindAddr = "127.0.0.1";
 let hooks = {};
+let logFn = () => {};
 
 let connSeq = 0;
 const hostCounters = new Map(); // host -> count
@@ -101,18 +102,34 @@ function isHiddenInfo(t) {
   if (t && t.type === "page" && url.startsWith("file://") && url.includes("/renderer/index.html")) return true;
   return false;
 }
-function filterBackendToClient(text) {
+function ownerScope(targetId) {
+  const e = targetToPane.get(targetId);
+  return e ? e.scopeKey : undefined;
+}
+// A target is visible to a connection if it isn't monica's shell AND it belongs
+// to that connection's scope (its ?label=, or a per-connection key). This gives
+// each session its own panes — agent-browser's getTargets comes back with only
+// this session's pages, so it creates its own instead of trampling another's.
+function visibleTo(ctx, t) {
+  if (isHiddenInfo(t)) return false;
+  if (!ctx.scopeKey) return true; // unscoped (e.g. a direct page socket)
+  return ownerScope(t && t.targetId) === ctx.scopeKey;
+}
+function filterBackendToClient(ctx, text) {
   if (!(text.includes("targetInfo") || text.includes("targetInfos"))) return text;
   let msg;
   try { msg = JSON.parse(text); } catch { return text; }
   if ((msg.method === "Target.targetCreated" || msg.method === "Target.targetInfoChanged") &&
-      msg.params && isHiddenInfo(msg.params.targetInfo)) {
+      msg.params && !visibleTo(ctx, msg.params.targetInfo)) {
     return null;
   }
   if (msg.result && Array.isArray(msg.result.targetInfos)) {
     const before = msg.result.targetInfos.length;
-    msg.result.targetInfos = msg.result.targetInfos.filter((t) => !isHiddenInfo(t));
-    if (msg.result.targetInfos.length !== before) return JSON.stringify(msg);
+    msg.result.targetInfos = msg.result.targetInfos.filter((t) => visibleTo(ctx, t));
+    if (msg.result.targetInfos.length !== before) {
+      logFn("proxy", "getTargets scope=" + (ctx.scopeKey || "-"), "->", msg.result.targetInfos.length + "/" + before);
+      return JSON.stringify(msg);
+    }
   }
   return text;
 }
@@ -122,6 +139,7 @@ function filterBackendToClient(text) {
 async function handleHttp(req, res) {
   const host = req.headers.host || bindAddr + ":" + PUBLIC_PORT;
   const path = (req.url || "/").split("?")[0];
+  logFn("http", req.method, path);
   try {
     if (path === "/json/version") {
       const v = await fetchJson("/json/version");
@@ -162,6 +180,7 @@ function onConnection(client, req) {
   const fullUrl = req.url || "/";
   const path = fullUrl.split("?")[0];
   const isBrowser = path.startsWith("/devtools/browser/");
+  logFn("conn", "ws connect", isBrowser ? "browser" : "page", path, "from", req.socket.remoteAddress || "?");
   const ctx = { client, backend: null, isBrowser, connectionId: null, backendOpen: false, pending: [] };
 
   const backend = new WebSocket(INTERNAL_WS + path, { perMessageDeflate: false });
@@ -172,7 +191,7 @@ function onConnection(client, req) {
     ctx.pending = [];
   });
   backend.on("message", (d) => {
-    const out = filterBackendToClient(typeof d === "string" ? d : d.toString());
+    const out = filterBackendToClient(ctx, typeof d === "string" ? d : d.toString());
     if (out !== null && client.readyState === WebSocket.OPEN) client.send(out);
   });
   backend.on("close", () => { try { client.close(); } catch {} });
@@ -181,6 +200,7 @@ function onConnection(client, req) {
   client.on("message", (d) => handleClientMessage(ctx, d));
   client.on("close", () => {
     try { backend.close(); } catch {}
+    logFn("conn", "ws close", ctx.connectionId != null ? "#" + ctx.connectionId : path);
     // Retain panes on disconnect (CDP semantics: disconnect = detach, not close).
     // Keep the targetToPane mappings so panes stay closable-by-target if a client
     // reconnects and attaches to them.
@@ -190,27 +210,39 @@ function onConnection(client, req) {
 
   if (isBrowser) {
     ctx.connectionId = ++connSeq;
-    assignLabel(ctx, fullUrl, req);
+    openConnection(ctx, fullUrl, req);
   }
 }
 
-async function assignLabel(ctx, fullUrl, req) {
+// Open the connection's tab SYNCHRONOUSLY (before any createTarget can arrive, so
+// the pane lands in the right tab and we don't spawn a duplicate). Label with an
+// immediate IP-based name, then refine to a reverse-DNS hostname asynchronously.
+function openConnection(ctx, fullUrl, req) {
   const ip = (req.socket.remoteAddress || "").replace(/^::ffff:/, "");
   let explicit = null;
   const qi = fullUrl.indexOf("?");
   if (qi >= 0) {
     try { explicit = new URLSearchParams(fullUrl.slice(qi + 1)).get("label"); } catch {}
   }
-  let label;
-  if (explicit) {
-    label = explicit;
-  } else {
-    const host = !ip || ip === "127.0.0.1" || ip === "::1" ? "localhost" : (await reverseDns(ip, 1000)) || ip;
-    const n = (hostCounters.get(host) || 0) + 1;
-    hostCounters.set(host, n);
-    label = host + ":#" + n;
-  }
+  // Scope key isolates targets: a stable ?label= for named/resumable sessions,
+  // else a per-connection key. Independent of the (async-refined) display label.
+  ctx.scopeKey = explicit || "conn-" + ctx.connectionId;
+  const baseHost = !ip || ip === "127.0.0.1" || ip === "::1" ? "localhost" : ip;
+  const n = (hostCounters.get(baseHost) || 0) + 1;
+  hostCounters.set(baseHost, n);
+  const label = explicit || baseHost + ":#" + n;
+  logFn("conn", "open #" + ctx.connectionId, "label=" + label, "scope=" + ctx.scopeKey);
   hooks.onConnectionOpen?.(ctx.connectionId, label);
+
+  if (!explicit && baseHost !== "localhost") {
+    reverseDns(ip, 1000).then((name) => {
+      if (name && name !== baseHost) {
+        const refined = name + ":#" + n;
+        logFn("conn", "relabel #" + ctx.connectionId, refined);
+        hooks.onConnectionLabel?.(ctx.connectionId, refined);
+      }
+    });
+  }
 }
 
 function forward(ctx, text) {
@@ -222,6 +254,10 @@ function handleClientMessage(ctx, data) {
   const text = typeof data === "string" ? data : data.toString();
   let msg;
   try { msg = JSON.parse(text); } catch { return forward(ctx, text); }
+
+  if (msg.method) {
+    logFn("cdp", "→", msg.method, msg.id != null ? "#" + msg.id : "", msg.sessionId ? "@" + String(msg.sessionId).slice(0, 8) : "");
+  }
 
   // monica panes render at their on-screen size. Neutralize client viewport
   // emulation (puppeteer.connect defaults to an 800x600 override) so the page
@@ -241,6 +277,7 @@ function handleClientMessage(ctx, data) {
     if (tid && targetToPane.has(tid)) {
       const { leafId } = targetToPane.get(tid);
       targetToPane.delete(tid);
+      logFn("proxy", "closeTarget", tid, "-> close pane leaf=" + leafId);
       Promise.resolve(hooks.closePane?.(leafId)).finally(() => reply(ctx.client, { id: msg.id, result: { success: true } }));
       return;
     }
@@ -254,7 +291,8 @@ async function doCreate(ctx, msg) {
   const { leafId } = (await hooks.createPane(ctx.connectionId, url)) || {};
   const targetId = await waitForNewWebview(before, 10000);
   if (!targetId) throw new Error("monica: new pane did not register a CDP target");
-  targetToPane.set(targetId, { connectionId: ctx.connectionId, leafId });
+  targetToPane.set(targetId, { connectionId: ctx.connectionId, leafId, scopeKey: ctx.scopeKey });
+  logFn("proxy", "createTarget url=" + url, "scope=" + ctx.scopeKey, "-> pane leaf=" + leafId, "target=" + targetId);
   reply(ctx.client, { id: msg.id, result: { targetId } });
 }
 
@@ -281,6 +319,7 @@ function closeServers() {
 async function start(opts) {
   hooks = opts.hooks || {};
   bindAddr = opts.bindAddr || "127.0.0.1";
+  if (opts.log) logFn = opts.log;
   await waitForInternal();
   await listen(bindAddr);
 }

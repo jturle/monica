@@ -22,6 +22,7 @@ const backdropGo = document.getElementById("backdrop-go");
 const GUTTER = 6;
 const BLANK = "about:blank";
 const isBlank = (u) => !u || u === BLANK;
+const dlog = (scope, msg) => window.api?.log?.(scope, msg); // -> monica-debug.log
 
 let tabSeq = 0;
 let leafSeq = 0;
@@ -167,6 +168,7 @@ function createPane(tab, leaf) {
   wv.addEventListener("did-navigate-in-page", (e) => setUrl(e.url));
 
   paneEls.set(leaf.id, el);
+  dlog("pane", "create leaf=" + leaf.id + " tab=" + tab.name + " url=" + leaf.url);
   return el;
 }
 
@@ -292,6 +294,7 @@ function splitSelected(dir) {
 
 function closeLeafInTab(tab, id) {
   if (!tab.root) return;
+  dlog("pane", "close leaf=" + id + " tab=" + tab.name);
   if (tab.root.type === "leaf" && tab.root.id === id) {
     if (tab.kind === "user") { closeTab(tab); return; } // last pane of a user tab → drop the tab
     const el = paneEls.get(id);
@@ -416,6 +419,7 @@ function addTab() {
 }
 
 function closeTab(tab) {
+  dlog("tab", "close " + tab.name);
   walkLeaves(tab.root, (l) => { const el = paneEls.get(l.id); if (el) { el.remove(); paneEls.delete(l.id); } });
   const idx = tabs.indexOf(tab);
   if (idx === -1) return;
@@ -464,11 +468,17 @@ backdropGo.addEventListener("keydown", (e) => {
 // ---- proxy-driven panes (external CDP clients) -----------------------------
 
 window.api?.onProxyConnectionOpen?.(({ connectionId, label }) => {
+  dlog("conn", "open #" + connectionId + " " + label);
   const t = makeEmptyTab(label);
   tabs.push(t);
   connTabs.set(connectionId, t);
   setActive(t);
   renderTabs();
+});
+
+window.api?.onProxyConnectionLabel?.((connectionId, label) => {
+  const t = connTabs.get(connectionId);
+  if (t) { t.name = label; refreshTabNaming(t); renderTabs(); }
 });
 
 window.api?.onProxyConnectionClose?.((connectionId) => {
@@ -482,8 +492,17 @@ window.api?.onProxyConnectionClose?.((connectionId) => {
 });
 
 window.api?.onProxyCreatePane?.(({ connectionId, url, reqId }) => {
+  dlog("conn", "create-pane #" + connectionId + " url=" + (url || BLANK));
   let t = connTabs.get(connectionId);
-  if (!t) { t = makeEmptyTab("agent"); tabs.push(t); connTabs.set(connectionId, t); renderTabs(); }
+  if (!t) {
+    // Connection tab missing (e.g. user closed it while the client stayed
+    // connected). Make a fresh one and activate it so the pane actually lays out.
+    t = makeEmptyTab("agent");
+    tabs.push(t);
+    connTabs.set(connectionId, t);
+    setActive(t);
+    renderTabs();
+  }
   const leaf = addPaneToTab(t, url || BLANK);
   renderTabs();
   window.api.replyCreatePane(reqId, leaf.id);
