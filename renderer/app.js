@@ -469,8 +469,14 @@ backdropGo.addEventListener("keydown", (e) => {
 
 window.api?.onProxyConnectionOpen?.(({ connectionId, label }) => {
   dlog("conn", "open #" + connectionId + " " + label);
-  const t = makeEmptyTab(label);
-  tabs.push(t);
+  // Resume: reuse an existing tab with the same name (a ?label= session
+  // reconnecting) instead of spawning a duplicate. Its retained panes are still
+  // alive and the proxy still scopes them to this label, so the client's
+  // getTargets returns them and re-attaches.
+  let t = tabs.find((x) => x.name === label);
+  if (t) dlog("conn", "resume tab " + label);
+  else { t = makeEmptyTab(label); tabs.push(t); }
+  t.kind = "conn";
   connTabs.set(connectionId, t);
   setActive(t);
   renderTabs();
