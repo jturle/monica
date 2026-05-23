@@ -82,27 +82,74 @@ function reply(client, obj) {
   if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify(obj));
 }
 
+const ROOT_PAGE =
+  '<!doctype html><meta charset="utf-8"><title>monica</title>' +
+  '<body style="font-family:-apple-system,system-ui,sans-serif;background:#0b0e14;color:#c7d0df;padding:40px">' +
+  '<h1 style="color:#38e1c4;margin:0 0 8px">monica CDP proxy</h1>' +
+  '<p>Enumerate targets at <a style="color:#38e1c4" href="/json">/json</a> · connect a CDP client to this origin.</p></body>';
+
+// Hide monica's own shell (and DevTools windows) from a client's target
+// DISCOVERY only: strip them from Target.getTargets results and drop
+// targetCreated/targetInfoChanged for them. We deliberately do NOT touch
+// Target.attachedToTarget — dropping that desyncs flatten auto-attach
+// (puppeteer) and hangs connect. agent-browser picks its page from getTargets
+// and creates one when none remain, so this makes it open a real pane instead
+// of taking over monica's UI.
+function isHiddenInfo(t) {
+  const url = (t && t.url) || "";
+  if (url.startsWith("devtools://")) return true;
+  if (t && t.type === "page" && url.startsWith("file://") && url.includes("/renderer/index.html")) return true;
+  return false;
+}
+function filterBackendToClient(text) {
+  if (!(text.includes("targetInfo") || text.includes("targetInfos"))) return text;
+  let msg;
+  try { msg = JSON.parse(text); } catch { return text; }
+  if ((msg.method === "Target.targetCreated" || msg.method === "Target.targetInfoChanged") &&
+      msg.params && isHiddenInfo(msg.params.targetInfo)) {
+    return null;
+  }
+  if (msg.result && Array.isArray(msg.result.targetInfos)) {
+    const before = msg.result.targetInfos.length;
+    msg.result.targetInfos = msg.result.targetInfos.filter((t) => !isHiddenInfo(t));
+    if (msg.result.targetInfos.length !== before) return JSON.stringify(msg);
+  }
+  return text;
+}
+
 // ---- HTTP: discovery endpoints, with ws URLs pointed back at this proxy -----
 
 async function handleHttp(req, res) {
   const host = req.headers.host || bindAddr + ":" + PUBLIC_PORT;
+  const path = (req.url || "/").split("?")[0];
   try {
-    if (req.url.startsWith("/json/version")) {
+    if (path === "/json/version") {
       const v = await fetchJson("/json/version");
       v.webSocketDebuggerUrl = rewriteWsHost(v.webSocketDebuggerUrl, host);
       return sendJson(res, v);
     }
-    if (req.url === "/json" || req.url.startsWith("/json/list")) {
-      const list = await fetchJson("/json/list");
+    if (path === "/json" || path === "/json/" || path === "/json/list") {
+      const list = (await fetchJson("/json/list")).filter((t) => !isHiddenInfo(t));
       for (const t of list) {
         if (t.webSocketDebuggerUrl) t.webSocketDebuggerUrl = rewriteWsHost(t.webSocketDebuggerUrl, host);
+        delete t.devtoolsFrontendUrl; // would point clients at the internal :9223 endpoint
+        delete t.devtoolsFrontendUrlCompat;
       }
       return sendJson(res, list);
     }
-    const r = await fetch(INTERNAL_HTTP + req.url, { method: req.method });
-    const body = await r.text();
-    res.writeHead(r.status, { "content-type": r.headers.get("content-type") || "application/json" });
-    res.end(body);
+    if (path === "/json/protocol") {
+      const r = await fetch(INTERNAL_HTTP + "/json/protocol");
+      res.writeHead(r.status, { "content-type": "application/json" });
+      return res.end(await r.text());
+    }
+    if (path === "/" || path === "") {
+      res.writeHead(200, { "content-type": "text/html" });
+      return res.end(ROOT_PAGE);
+    }
+    // Don't proxy Chromium's root listing / DevTools frontend / /json/new — they
+    // leak the internal endpoint and bypass the proxy.
+    res.writeHead(404, { "content-type": "text/plain" });
+    res.end("monica proxy: not found");
   } catch (e) {
     res.writeHead(502);
     res.end("monica proxy error: " + e.message);
@@ -125,7 +172,8 @@ function onConnection(client, req) {
     ctx.pending = [];
   });
   backend.on("message", (d) => {
-    if (client.readyState === WebSocket.OPEN) client.send(typeof d === "string" ? d : d.toString());
+    const out = filterBackendToClient(typeof d === "string" ? d : d.toString());
+    if (out !== null && client.readyState === WebSocket.OPEN) client.send(out);
   });
   backend.on("close", () => { try { client.close(); } catch {} });
   backend.on("error", () => { try { client.close(); } catch {} });
@@ -133,12 +181,10 @@ function onConnection(client, req) {
   client.on("message", (d) => handleClientMessage(ctx, d));
   client.on("close", () => {
     try { backend.close(); } catch {}
-    if (ctx.connectionId != null) {
-      for (const [tid, info] of targetToPane) {
-        if (info.connectionId === ctx.connectionId) targetToPane.delete(tid);
-      }
-      hooks.onConnectionClose?.(ctx.connectionId);
-    }
+    // Retain panes on disconnect (CDP semantics: disconnect = detach, not close).
+    // Keep the targetToPane mappings so panes stay closable-by-target if a client
+    // reconnects and attaches to them.
+    if (ctx.connectionId != null) hooks.onConnectionClose?.(ctx.connectionId);
   });
   client.on("error", () => { try { backend.close(); } catch {} });
 
