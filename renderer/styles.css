@@ -144,6 +144,37 @@ body { display: flex; flex-direction: column; }
 /* ---- stage / panes ---- */
 #stage { position: relative; flex: 1; overflow: hidden; }
 
+/* empty-state backdrop (shell UI, not a webview / CDP target) */
+#backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+}
+#backdrop.hidden { display: none; }
+#backdrop .bd-mark { font-size: 34px; font-weight: 700; letter-spacing: 1px; color: var(--accent); }
+#backdrop #backdrop-go {
+  width: min(520px, 70vw);
+  height: 44px;
+  margin-top: 22px;
+  padding: 0 16px;
+  background: #0d1018;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  color: var(--text);
+  font-size: 15px;
+  outline: none;
+  text-align: center;
+}
+#backdrop #backdrop-go:focus { border-color: var(--accent); }
+#backdrop #backdrop-go::placeholder { color: var(--muted); }
+#backdrop .bd-hint { margin-top: 16px; color: var(--muted); font-size: 11px; }
+#backdrop .bd-hint kbd { background: #0d1018; border: 1px solid var(--line-2); border-radius: 4px; padding: 1px 5px; }
+
 .pane {
   position: absolute;
   display: flex;

@@ -1,46 +1,49 @@
 // monica — tabs of tiling browser panes.
 //
-// A TAB owns an independent pane tree (root may be null = empty tab) and its own
+// A TAB owns an independent pane tree (root may be null = empty) and its own
 // selection. A pane tree is a binary tree: a leaf is one browser (<webview>); a
 // split node arranges two children side-by-side (dir:"row") or stacked
 // (dir:"col"), with sizes[0] = the first child's fraction of the node's area.
 //
-// User tabs (⌘T) start with one example.com pane. Connection tabs (created when an
-// external CDP client connects) start EMPTY and fill as the client calls newPage()
-// — those panes auto-tile by splitting the largest pane along its long axis.
+// There may be NO tabs at all — then `active` is null and the stage shows the
+// backdrop (shell UI, not a webview, so not a CDP target). User tabs (⌘T) start
+// with one blank (about:blank) pane. Connection tabs (an external CDP client
+// connecting) start EMPTY and fill as the client calls newPage().
 //
-// Every pane is absolutely positioned in #stage; only the active tab's panes show.
-// Re-layout only updates styles, so a <webview> is never reparented (which reloads).
+// Every pane is absolutely positioned in #stage; only the active tab's panes
+// show. Re-layout only updates styles, so a <webview> is never reparented.
 
 const stage = document.getElementById("stage");
 const omnibox = document.getElementById("omnibox");
 const tabsBar = document.getElementById("tabs");
+const backdrop = document.getElementById("backdrop");
+const backdropGo = document.getElementById("backdrop-go");
 
 const GUTTER = 6;
-const START_URL = new URL("newtab.html", location.href).href; // monica's internal new-pane page
-const isBlank = (u) => !u || u === START_URL || u === "about:blank";
+const BLANK = "about:blank";
+const isBlank = (u) => !u || u === BLANK;
 
 let tabSeq = 0;
 let leafSeq = 0;
 
-const makeLeaf = (tab, url = START_URL) => ({ type: "leaf", id: ++leafSeq, n: ++tab.n, url });
+const makeLeaf = (tab, url = BLANK) => ({ type: "leaf", id: ++leafSeq, n: ++tab.n, url });
 
-function makeTab(name) {
-  const t = { id: ++tabSeq, name: name || "tab-" + tabSeq, root: null, selectedId: null, n: 0 };
-  const leaf = makeLeaf(t);
+function makeTab(name, url) {
+  const t = { id: ++tabSeq, name: name || "tab-" + tabSeq, root: null, selectedId: null, n: 0, kind: "user" };
+  const leaf = makeLeaf(t, url || BLANK);
   t.root = leaf;
   t.selectedId = leaf.id;
   return t;
 }
 function makeEmptyTab(name) {
-  return { id: ++tabSeq, name: name || "tab-" + tabSeq, root: null, selectedId: null, n: 0 };
+  return { id: ++tabSeq, name: name || "tab-" + tabSeq, root: null, selectedId: null, n: 0, kind: "conn" };
 }
 
-let tabs = [makeTab("main")];
-let active = tabs[0];
+let tabs = [];
+let active = null;
 
 const paneEls = new Map(); // leaf id -> .pane element (across all tabs)
-let dividerEls = []; // parallel to computeRects(active).dividers order
+let dividerEls = []; // parallel to rectsOf(active.root).dividers order
 const connTabs = new Map(); // connectionId -> tab
 
 // ---- naming ----------------------------------------------------------------
@@ -48,10 +51,17 @@ const connTabs = new Map(); // connectionId -> tab
 function slug(name) {
   return name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "tab";
 }
-// Pane label is monica-internal (shown in the pane header only). We deliberately
-// do NOT write it into the guest's document.title — that would pollute what an
-// attached client's page.title() reads.
 const labelFor = (tab, leaf) => slug(tab.name) + "-" + leaf.n;
+
+// ---- url normalization -----------------------------------------------------
+
+function normalizeUrl(u) {
+  u = (u || "").trim();
+  if (!u) return "";
+  if (/^(https?|about|chrome|file|data|view-source|blob|devtools):/i.test(u)) return u;
+  const looksLikeHost = /^localhost(:\d+)?(\/|$)/i.test(u) || /^[^\s.]+\.[^\s]/.test(u);
+  return looksLikeHost ? "https://" + u : "https://www.google.com/search?q=" + encodeURIComponent(u);
+}
 
 // ---- tree helpers ----------------------------------------------------------
 
@@ -72,7 +82,7 @@ function tabOf(leafId) {
   return tabs.find((t) => leafIn(t.root, leafId)) || null;
 }
 
-// Pixel rects for leaves/dividers of a given tab, using the stage size as canvas.
+// Pixel rects for leaves/dividers of a node, using the stage size as canvas.
 function rectsOf(node) {
   const W = stage.clientWidth || 1280;
   const H = stage.clientHeight || 800;
@@ -133,6 +143,7 @@ function createPane(tab, leaf) {
   const pname = chrome.querySelector(".pname");
   const ptitle = chrome.querySelector(".ptitle");
   pname.textContent = labelFor(tab, leaf);
+  ptitle.textContent = isBlank(leaf.url) ? "new tab" : "";
 
   const wv = document.createElement("webview");
   wv.setAttribute("partition", "persist:pane-" + leaf.id); // stable isolation, independent of name
@@ -149,9 +160,9 @@ function createPane(tab, leaf) {
   wv.addEventListener("focus", () => select(leaf.id));
   wv.addEventListener("page-title-updated", (e) => {
     pname.textContent = labelFor(tabOf(leaf.id) || tab, leaf);
-    ptitle.textContent = e.title || leaf.url;
+    ptitle.textContent = e.title || (isBlank(leaf.url) ? "new tab" : leaf.url);
   });
-  const setUrl = (u) => { leaf.url = u; if (leaf.id === active.selectedId) omnibox.value = isBlank(u) ? "" : u; };
+  const setUrl = (u) => { leaf.url = u; if (active && leaf.id === active.selectedId) omnibox.value = isBlank(u) ? "" : u; };
   wv.addEventListener("did-navigate", (e) => setUrl(e.url));
   wv.addEventListener("did-navigate-in-page", (e) => setUrl(e.url));
 
@@ -165,19 +176,24 @@ function setRect(el, r) {
 }
 
 function positionAll() {
-  if (!active.root) return;
+  if (!active || !active.root) return;
   const { leaves, dividers } = rectsOf(active.root);
   leaves.forEach(({ id, rect }) => { const el = paneEls.get(id); if (el) setRect(el, rect); });
   dividers.forEach((d, i) => { if (dividerEls[i]) setRect(dividerEls[i], d.rect); });
 }
 
+function updateBackdrop() {
+  backdrop.classList.toggle("hidden", !!(active && active.root));
+}
+
 function layout() {
   for (const [, el] of paneEls) {
-    el.style.display = el.dataset.tab === String(active.id) ? "" : "none";
+    el.style.display = active && el.dataset.tab === String(active.id) ? "" : "none";
   }
   dividerEls.forEach((d) => d.remove());
   dividerEls = [];
-  if (!active.root) return;
+  updateBackdrop();
+  if (!active || !active.root) return;
   const { leaves, dividers } = rectsOf(active.root);
   leaves.forEach(({ id, leaf }) => { if (!paneEls.has(id)) createPane(active, leaf); });
   dividerEls = dividers.map((d) => makeDivider(active.root, d));
@@ -220,6 +236,7 @@ function makeDivider(root, d) {
 // ---- pane operations -------------------------------------------------------
 
 function select(id) {
+  if (!active) return;
   active.selectedId = id;
   for (const [, el] of paneEls) {
     if (el.dataset.tab === String(active.id)) el.classList.toggle("selected", el.dataset.id === String(id));
@@ -228,9 +245,9 @@ function select(id) {
   omnibox.value = lf && !isBlank(lf.url) ? lf.url : "";
 }
 
-// Split a specific leaf in a tab; returns the new leaf. Direction "auto" picks the
-// long axis of the largest existing pane for a balanced grid.
-function addPaneToTab(tab, url = "about:blank") {
+// Add a pane to a tab (auto-tiles by splitting the largest pane along its long
+// axis). Returns the new leaf.
+function addPaneToTab(tab, url = BLANK) {
   let leaf;
   if (!tab.root) {
     leaf = makeLeaf(tab, url);
@@ -257,6 +274,7 @@ function addPaneToTab(tab, url = "about:blank") {
 }
 
 function splitSelected(dir) {
+  if (!active) return;
   if (!active.root) { addPaneToTab(active); return; }
   let newId = null;
   active.root = (function replace(n) {
@@ -274,12 +292,13 @@ function splitSelected(dir) {
 
 function closeLeafInTab(tab, id) {
   if (!tab.root) return;
-  const el = paneEls.get(id);
   if (tab.root.type === "leaf" && tab.root.id === id) {
+    if (tab.kind === "user") { closeTab(tab); return; } // last pane of a user tab → drop the tab
+    const el = paneEls.get(id);
     if (el) { el.remove(); paneEls.delete(id); }
     tab.root = null;
     tab.selectedId = null;
-    if (active === tab) layout();
+    if (active === tab) layout(); // connection tab: keep it (empty) for the next newPage()
     return;
   }
   tab.root = (function remove(n) {
@@ -290,6 +309,7 @@ function closeLeafInTab(tab, id) {
     n.children = [remove(a), remove(b)];
     return n;
   })(tab.root);
+  const el = paneEls.get(id);
   if (el) { el.remove(); paneEls.delete(id); }
   if (!leafIn(tab.root, tab.selectedId)) tab.selectedId = firstLeaf(tab.root).id;
   if (active === tab) { layout(); select(tab.selectedId); }
@@ -300,9 +320,26 @@ function closeLeafAnywhere(id) {
   if (t) closeLeafInTab(t, id);
 }
 
+function selectedWebview() {
+  return active ? paneEls.get(active.selectedId)?.querySelector("webview") : null;
+}
+function editingText() {
+  const a = document.activeElement;
+  return !!a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.isContentEditable);
+}
 function reloadSelected() {
-  const wv = paneEls.get(active.selectedId)?.querySelector("webview");
+  const wv = selectedWebview();
   if (wv) wv.reload();
+}
+function navBack() {
+  if (editingText()) return; // don't hijack ⌘← while typing in the omnibox
+  const wv = selectedWebview();
+  if (wv && wv.canGoBack()) wv.goBack();
+}
+function navForward() {
+  if (editingText()) return;
+  const wv = selectedWebview();
+  if (wv && wv.canGoForward()) wv.goForward();
 }
 
 // ---- tab operations --------------------------------------------------------
@@ -364,47 +401,64 @@ function setActive(tab) {
   if (tab === active) return;
   active = tab;
   layout();
-  if (active.selectedId) select(active.selectedId);
+  if (active && active.selectedId) select(active.selectedId);
   else omnibox.value = "";
   renderTabs();
 }
 
 function addTab() {
-  const t = makeTab();
+  const t = makeTab(); // user tab with one blank pane
   tabs.push(t);
   setActive(t);
   renderTabs();
+  omnibox.focus(); // ready to type a URL immediately
+  omnibox.select();
 }
 
 function closeTab(tab) {
-  if (tabs.length === 1) return; // keep at least one tab
   walkLeaves(tab.root, (l) => { const el = paneEls.get(l.id); if (el) { el.remove(); paneEls.delete(l.id); } });
   const idx = tabs.indexOf(tab);
+  if (idx === -1) return;
   tabs.splice(idx, 1);
   for (const [cid, t] of connTabs) if (t === tab) connTabs.delete(cid);
   if (active === tab) {
-    active = tabs[Math.max(0, idx - 1)];
+    active = tabs[Math.min(idx, tabs.length - 1)] || null; // may be null → backdrop
     layout();
-    if (active.selectedId) select(active.selectedId); else omnibox.value = "";
+    if (active && active.selectedId) select(active.selectedId);
+    else omnibox.value = "";
   }
   renderTabs();
 }
 
-// ---- omnibox ---------------------------------------------------------------
+// ---- omnibox + backdrop entry ----------------------------------------------
 
 omnibox.addEventListener("keydown", (e) => {
   if (e.key !== "Enter") return;
-  const lf = leafIn(active.root, active.selectedId);
-  if (!lf) return;
-  let u = omnibox.value.trim();
+  const u = normalizeUrl(omnibox.value);
   if (!u) return;
-  const hasScheme = /^(https?|about|chrome|file|data|view-source|blob|devtools):/i.test(u);
-  if (!hasScheme) {
-    const looksLikeHost = /^localhost(:\d+)?(\/|$)/i.test(u) || /^[^\s.]+\.[^\s]/.test(u);
-    u = looksLikeHost ? "https://" + u : "https://www.google.com/search?q=" + encodeURIComponent(u);
+  if (!active) {
+    // no tabs open → create one navigated to the entry
+    const t = makeTab(undefined, u);
+    tabs.push(t);
+    setActive(t);
+    renderTabs();
+    return;
   }
+  const lf = leafIn(active.root, active.selectedId);
+  if (!lf) { addPaneToTab(active, u); renderTabs(); return; } // empty tab → add a pane
   const wv = paneEls.get(lf.id)?.querySelector("webview");
   if (wv) wv.src = u;
+});
+
+backdropGo.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  const u = normalizeUrl(backdropGo.value);
+  if (!u) return;
+  const t = makeTab(undefined, u); // open a new tab navigated to the entry
+  tabs.push(t);
+  setActive(t);
+  renderTabs();
+  backdropGo.value = "";
 });
 
 // ---- proxy-driven panes (external CDP clients) -----------------------------
@@ -419,17 +473,13 @@ window.api?.onProxyConnectionOpen?.(({ connectionId, label }) => {
 
 window.api?.onProxyConnectionClose?.((connectionId) => {
   const t = connTabs.get(connectionId);
-  if (!t) return;
-  // disconnect → tear the connection's tab + panes back down. If it's the only tab
-  // left, drop in a fresh main tab first so we always land somewhere.
-  if (tabs.length === 1) tabs.push(makeTab("main"));
-  closeTab(t);
+  if (t) closeTab(t); // disconnect → tear the connection's tab + panes back down
 });
 
 window.api?.onProxyCreatePane?.(({ connectionId, url, reqId }) => {
   let t = connTabs.get(connectionId);
   if (!t) { t = makeEmptyTab("agent"); tabs.push(t); connTabs.set(connectionId, t); renderTabs(); }
-  const leaf = addPaneToTab(t, url || "about:blank");
+  const leaf = addPaneToTab(t, url || BLANK);
   renderTabs();
   window.api.replyCreatePane(reqId, leaf.id);
 });
@@ -442,17 +492,16 @@ const cdpBadge = document.getElementById("cdp-badge");
 const cdpToggle = document.getElementById("cdp-toggle");
 let cdpLabel = "CDP :9222";
 let cdpEndpoint = "http://127.0.0.1:9222";
-let cdpIsLan = false;
 let copyTimer = null;
 
 function applyCdpState({ mode, port, lanIp }) {
-  cdpIsLan = mode === "lan";
-  const host = cdpIsLan ? lanIp : "127.0.0.1";
+  const lan = mode === "lan";
+  const host = lan ? lanIp : "127.0.0.1";
   cdpEndpoint = "http://" + host + ":" + port;
-  cdpLabel = cdpIsLan ? "CDP " + host + ":" + port : "CDP :" + port;
+  cdpLabel = lan ? "CDP " + host + ":" + port : "CDP :" + port;
   cdpBadge.title = "Click to copy " + cdpEndpoint;
   cdpBadge.textContent = cdpLabel;
-  cdpBadge.classList.toggle("lan", cdpIsLan);
+  cdpBadge.classList.toggle("lan", lan);
   cdpToggle.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
 }
 
@@ -476,13 +525,14 @@ cdpToggle.addEventListener("click", async (e) => {
 // ---- boot ------------------------------------------------------------------
 
 window.api?.onSplit((dir) => splitSelected(dir));
-window.api?.onClosePane(() => { if (active.selectedId) closeLeafAnywhere(active.selectedId); });
+window.api?.onClosePane(() => { if (active && active.selectedId) closeLeafAnywhere(active.selectedId); });
 window.api?.onReloadPane(() => reloadSelected());
+window.api?.onNavBack?.(() => navBack());
+window.api?.onNavForward?.(() => navForward());
 window.api?.onNewTab(() => addTab());
-window.api?.onCloseTab(() => closeTab(active));
+window.api?.onCloseTab(() => { if (active) closeTab(active); });
 window.addEventListener("resize", () => positionAll());
 
 renderTabs();
-layout();
-if (active.selectedId) select(active.selectedId);
+layout(); // no tabs yet → shows the backdrop
 initCdpToggle();

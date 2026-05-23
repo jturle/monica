@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, dialog } = require("electron");
+const { app, BrowserWindow, Menu, ipcMain, dialog, clipboard } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -84,6 +84,8 @@ const proxyHooks = {
 
 // ---- CDP bind controls -----------------------------------------------------
 
+ipcMain.on("clipboard:write", (_e, text) => clipboard.writeText(String(text ?? "")));
+
 ipcMain.handle("cdp:get", () => ({ mode: cdpMode, port: PUBLIC_PORT, lanIp: firstLanIPv4() }));
 
 ipcMain.handle("cdp:set", async (e, requested) => {
@@ -130,6 +132,9 @@ function buildMenu() {
       submenu: [
         { label: "Split Right (side-by-side)", accelerator: "CmdOrCtrl+D", click: (_i, win) => send(win, "split", "row") },
         { label: "Split Down (stacked)", accelerator: "CmdOrCtrl+Shift+D", click: (_i, win) => send(win, "split", "col") },
+        { type: "separator" },
+        { label: "Back", accelerator: "CmdOrCtrl+Left", click: (_i, win) => send(win, "nav-back") },
+        { label: "Forward", accelerator: "CmdOrCtrl+Right", click: (_i, win) => send(win, "nav-forward") },
         { type: "separator" },
         { label: "Reload Pane", accelerator: "CmdOrCtrl+R", click: (_i, win) => send(win, "reload-pane") },
         { label: "Close Pane", accelerator: "CmdOrCtrl+W", click: (_i, win) => send(win, "close-pane") },

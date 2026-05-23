@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer, clipboard } = require("electron");
+const { contextBridge, ipcRenderer } = require("electron");
 
 // Split/close/tab hotkeys come through the app menu (accelerators fire even when a
 // <webview> guest has keyboard focus — a plain renderer keydown listener would not).
@@ -6,12 +6,14 @@ contextBridge.exposeInMainWorld("api", {
   onSplit: (cb) => ipcRenderer.on("split", (_e, dir) => cb(dir)),
   onClosePane: (cb) => ipcRenderer.on("close-pane", () => cb()),
   onReloadPane: (cb) => ipcRenderer.on("reload-pane", () => cb()),
+  onNavBack: (cb) => ipcRenderer.on("nav-back", () => cb()),
+  onNavForward: (cb) => ipcRenderer.on("nav-forward", () => cb()),
   onNewTab: (cb) => ipcRenderer.on("new-tab", () => cb()),
   onCloseTab: (cb) => ipcRenderer.on("close-tab", () => cb()),
 
   getCdpMode: () => ipcRenderer.invoke("cdp:get"),
   setCdpMode: (mode) => ipcRenderer.invoke("cdp:set", mode), // returns new {mode, port, lanIp}
-  copy: (text) => clipboard.writeText(text),
+  copy: (text) => ipcRenderer.send("clipboard:write", text), // clipboard isn't available in a sandboxed preload
 
   // proxy-driven panes (external CDP clients creating/closing pages)
   onProxyConnectionOpen: (cb) => ipcRenderer.on("proxy:connection-open", (_e, d) => cb(d)),
