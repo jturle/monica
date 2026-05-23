@@ -22,13 +22,6 @@ const INTERNAL_HTTP = "http://127.0.0.1:9223";
 const INTERNAL_WS = "ws://127.0.0.1:9223";
 const PUBLIC_PORT = 9222;
 
-const ROOT_PAGE =
-  '<!doctype html><meta charset="utf-8"><title>monica</title>' +
-  '<body style="font-family:-apple-system,system-ui,sans-serif;background:#0b0e14;color:#c7d0df;padding:40px">' +
-  '<h1 style="color:#38e1c4;margin:0 0 8px">monica CDP proxy</h1>' +
-  '<p>Enumerate targets at <a style="color:#38e1c4" href="/json">/json</a> · ' +
-  "connect a CDP client to this origin.</p></body>";
-
 let httpServer = null;
 let wss = null;
 let bindAddr = "127.0.0.1";
@@ -38,50 +31,6 @@ let connSeq = 0;
 const hostCounters = new Map(); // host -> count
 const targetToPane = new Map(); // CDP targetId -> { connectionId, leafId }
 let createChain = Promise.resolve(); // serialize createTarget handling for clean correlation
-
-// Targets we hide from external clients: monica's own shell UI (privileged — it
-// holds the preload/IPC bridge) and any DevTools windows.
-const hiddenIds = new Set();
-let reservedId = 2000000000; // ids for proxy-originated CDP commands (won't collide with client ids)
-
-function isHiddenInfo(t) {
-  const url = (t && t.url) || "";
-  if (url.startsWith("devtools://")) return true;
-  if (t && t.type === "page" && url.startsWith("file://") && url.includes("/renderer/index.html")) return true;
-  return false;
-}
-
-// Filter a backend->client message: drop target events about hidden targets and
-// strip hidden entries from Target.getTargets results. Returns text, modified
-// text, or null (drop). Fast-paths messages that can't reference targets.
-function filterBackendToClient(ctx, text) {
-  if (!(text.includes("targetInfo") || text.includes("targetInfos"))) return text;
-  let msg;
-  try { msg = JSON.parse(text); } catch { return text; }
-
-  const ti = msg.params && msg.params.targetInfo;
-  if (ti && isHiddenInfo(ti)) {
-    if (ti.targetId) hiddenIds.add(ti.targetId);
-    // If Chromium paused this hidden target waiting for a debugger (auto-attach),
-    // resume it ourselves so monica's UI never hangs (e.g. on a shell reload).
-    if (msg.method === "Target.attachedToTarget" && msg.params.waitingForDebugger && msg.params.sessionId) {
-      try {
-        ctx.backend.send(JSON.stringify({ id: ++reservedId, method: "Runtime.runIfWaitingForDebugger", sessionId: msg.params.sessionId }));
-      } catch {}
-    }
-    return null;
-  }
-
-  if (msg.result && Array.isArray(msg.result.targetInfos)) {
-    const before = msg.result.targetInfos.length;
-    msg.result.targetInfos = msg.result.targetInfos.filter((t) => {
-      if (isHiddenInfo(t)) { if (t.targetId) hiddenIds.add(t.targetId); return false; }
-      return true;
-    });
-    if (msg.result.targetInfos.length !== before) return JSON.stringify(msg);
-  }
-  return text;
-}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -137,38 +86,23 @@ function reply(client, obj) {
 
 async function handleHttp(req, res) {
   const host = req.headers.host || bindAddr + ":" + PUBLIC_PORT;
-  const path = (req.url || "/").split("?")[0];
   try {
-    if (path === "/json/version") {
+    if (req.url.startsWith("/json/version")) {
       const v = await fetchJson("/json/version");
       v.webSocketDebuggerUrl = rewriteWsHost(v.webSocketDebuggerUrl, host);
       return sendJson(res, v);
     }
-    if (path === "/json" || path === "/json/" || path === "/json/list") {
-      const raw = await fetchJson("/json/list");
-      for (const t of raw) if (isHiddenInfo(t) && t.id) hiddenIds.add(t.id);
-      const list = raw.filter((t) => !isHiddenInfo(t));
+    if (req.url === "/json" || req.url.startsWith("/json/list")) {
+      const list = await fetchJson("/json/list");
       for (const t of list) {
         if (t.webSocketDebuggerUrl) t.webSocketDebuggerUrl = rewriteWsHost(t.webSocketDebuggerUrl, host);
-        delete t.devtoolsFrontendUrl; // would point clients at the internal :9223 endpoint
-        delete t.devtoolsFrontendUrlCompat;
       }
       return sendJson(res, list);
     }
-    if (path === "/json/protocol") {
-      const r = await fetch(INTERNAL_HTTP + "/json/protocol");
-      res.writeHead(r.status, { "content-type": "application/json" });
-      return res.end(await r.text());
-    }
-    if (path === "/" || path === "") {
-      res.writeHead(200, { "content-type": "text/html" });
-      return res.end(ROOT_PAGE);
-    }
-    // Everything else — Chromium's "Inspectable pages" HTML, the DevTools
-    // frontend, the /json/new create endpoint — is intentionally NOT proxied. It
-    // would leak the internal endpoint and bypass the proxy's filtering.
-    res.writeHead(404, { "content-type": "text/plain" });
-    res.end("monica proxy: not found");
+    const r = await fetch(INTERNAL_HTTP + req.url, { method: req.method });
+    const body = await r.text();
+    res.writeHead(r.status, { "content-type": r.headers.get("content-type") || "application/json" });
+    res.end(body);
   } catch (e) {
     res.writeHead(502);
     res.end("monica proxy error: " + e.message);
@@ -181,11 +115,6 @@ function onConnection(client, req) {
   const fullUrl = req.url || "/";
   const path = fullUrl.split("?")[0];
   const isBrowser = path.startsWith("/devtools/browser/");
-
-  // Refuse direct page-socket connections to a hidden target (e.g. the shell).
-  const pageMatch = path.match(/^\/devtools\/page\/(.+)$/);
-  if (pageMatch && hiddenIds.has(pageMatch[1])) { client.close(); return; }
-
   const ctx = { client, backend: null, isBrowser, connectionId: null, backendOpen: false, pending: [] };
 
   const backend = new WebSocket(INTERNAL_WS + path, { perMessageDeflate: false });
@@ -196,9 +125,7 @@ function onConnection(client, req) {
     ctx.pending = [];
   });
   backend.on("message", (d) => {
-    const text = typeof d === "string" ? d : d.toString();
-    const out = filterBackendToClient(ctx, text);
-    if (out !== null && client.readyState === WebSocket.OPEN) client.send(out);
+    if (client.readyState === WebSocket.OPEN) client.send(typeof d === "string" ? d : d.toString());
   });
   backend.on("close", () => { try { client.close(); } catch {} });
   backend.on("error", () => { try { client.close(); } catch {} });
@@ -249,11 +176,6 @@ function handleClientMessage(ctx, data) {
   const text = typeof data === "string" ? data : data.toString();
   let msg;
   try { msg = JSON.parse(text); } catch { return forward(ctx, text); }
-
-  // Refuse attaching to a hidden target (defense in depth — clients never see it).
-  if (msg.method === "Target.attachToTarget" && msg.params && hiddenIds.has(msg.params.targetId)) {
-    return reply(ctx.client, { id: msg.id, sessionId: msg.sessionId, error: { code: -32000, message: "monica: target not available" } });
-  }
 
   // monica panes render at their on-screen size. Neutralize client viewport
   // emulation (puppeteer.connect defaults to an 800x600 override) so the page
