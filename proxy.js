@@ -11,7 +11,7 @@
 //
 //   Target.closeTarget   (page.close()) — we remove the corresponding pane.
 //
-// Each browser-endpoint connection becomes a labelled monica tab; the panes it
+// Each browser-endpoint connection becomes a named monica tab; the panes it
 // creates tile within that tab.
 
 const http = require("http");
@@ -107,7 +107,7 @@ function ownerScope(targetId) {
   return e ? e.scopeKey : undefined;
 }
 // A target is visible to a connection if it isn't monica's shell AND it belongs
-// to that connection's scope (its ?label=, or a per-connection key). This gives
+// to that connection's scope (its ?session=, or a per-connection key). This gives
 // each session its own panes — agent-browser's getTargets comes back with only
 // this session's pages, so it creates its own instead of trampling another's.
 function visibleTo(ctx, t) {
@@ -219,26 +219,26 @@ function onConnection(client, req) {
 // immediate IP-based name, then refine to a reverse-DNS hostname asynchronously.
 function openConnection(ctx, fullUrl, req) {
   const ip = (req.socket.remoteAddress || "").replace(/^::ffff:/, "");
-  let explicit = null;
+  let session = null;
   const qi = fullUrl.indexOf("?");
   if (qi >= 0) {
-    try { explicit = new URLSearchParams(fullUrl.slice(qi + 1)).get("label"); } catch {}
+    try { session = new URLSearchParams(fullUrl.slice(qi + 1)).get("session"); } catch {}
   }
-  // Scope key isolates targets: a stable ?label= for named/resumable sessions,
-  // else a per-connection key. Independent of the (async-refined) display label.
-  ctx.scopeKey = explicit || "conn-" + ctx.connectionId;
+  // Scope key isolates targets: a stable ?session= for named/resumable sessions,
+  // else a per-connection key. Independent of the (async-refined) display name.
+  ctx.scopeKey = session || "conn-" + ctx.connectionId;
   const baseHost = !ip || ip === "127.0.0.1" || ip === "::1" ? "localhost" : ip;
   const n = (hostCounters.get(baseHost) || 0) + 1;
   hostCounters.set(baseHost, n);
-  const label = explicit || baseHost + ":#" + n;
-  logFn("conn", "open #" + ctx.connectionId, "label=" + label, "scope=" + ctx.scopeKey);
-  hooks.onConnectionOpen?.(ctx.connectionId, label);
+  const name = session || baseHost + ":#" + n;
+  logFn("conn", "open #" + ctx.connectionId, "session=" + (session || "-"), "name=" + name, "scope=" + ctx.scopeKey);
+  hooks.onConnectionOpen?.(ctx.connectionId, name);
 
-  if (!explicit && baseHost !== "localhost") {
-    reverseDns(ip, 1000).then((name) => {
-      if (name && name !== baseHost) {
-        const refined = name + ":#" + n;
-        logFn("conn", "relabel #" + ctx.connectionId, refined);
+  if (!session && baseHost !== "localhost") {
+    reverseDns(ip, 1000).then((host) => {
+      if (host && host !== baseHost) {
+        const refined = host + ":#" + n;
+        logFn("conn", "rename #" + ctx.connectionId, refined);
         hooks.onConnectionLabel?.(ctx.connectionId, refined);
       }
     });
