@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld("api", {
   getCdpMode: () => ipcRenderer.invoke("cdp:get"),
   setCdpMode: (mode) => ipcRenderer.invoke("cdp:set", mode), // returns new {mode, port, lanIp}
   copy: (text) => ipcRenderer.send("clipboard:write", text), // clipboard isn't available in a sandboxed preload
+  confirmQuit: () => ipcRenderer.send("app:confirm-quit"),
 
   // proxy-driven panes (external CDP clients creating/closing pages)
   onProxyConnectionOpen: (cb) => ipcRenderer.on("proxy:connection-open", (_e, d) => cb(d)),

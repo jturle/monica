@@ -472,8 +472,13 @@ window.api?.onProxyConnectionOpen?.(({ connectionId, label }) => {
 });
 
 window.api?.onProxyConnectionClose?.((connectionId) => {
+  // Retain on disconnect (CDP: disconnect = detach, not close). Detach the tab
+  // from the dead connection so it behaves like a normal tab; its panes stay live
+  // and re-attachable, and close only via page.close() or manually.
   const t = connTabs.get(connectionId);
-  if (t) closeTab(t); // disconnect → tear the connection's tab + panes back down
+  if (!t) return;
+  connTabs.delete(connectionId);
+  t.kind = "user";
 });
 
 window.api?.onProxyCreatePane?.(({ connectionId, url, reqId }) => {
@@ -494,6 +499,39 @@ let cdpLabel = "CDP :9222";
 let cdpEndpoint = "http://127.0.0.1:9222";
 let copyTimer = null;
 
+// Copy-paste prompts shown on the welcome backdrop. __ENDPOINT__ is filled with
+// the live CDP endpoint so they're correct in Local or LAN mode.
+const PROMPTS = {
+  puppeteer:
+    "Use the monica browser cockpit for browser work in this task. Connect with\n" +
+    "puppeteer-core to the existing CDP endpoint — do not launch your own browser:\n\n" +
+    "  const puppeteer = require('puppeteer-core');\n" +
+    "  const browser = await puppeteer.connect({ browserURL: '__ENDPOINT__', defaultViewport: null });\n" +
+    "  const page = await browser.newPage();   // opens a pane in monica\n" +
+    "  // ...do the task...\n" +
+    "  await browser.disconnect();             // use disconnect(), never close()\n\n" +
+    "To reuse an open page: browser.targets(), filter t.type()==='webview', await target.page().",
+  agentBrowser:
+    "Use agent-browser for browser work, but attach it to monica's existing CDP\n" +
+    "endpoint instead of launching a separate browser — connect it to __ENDPOINT__\n" +
+    "(Chrome DevTools Protocol over HTTP). Pages open as panes in monica that I can\n" +
+    "watch and take over. When finished, detach — don't close the browser.",
+  generic:
+    "For any browser task, attach to the running Chromium at __ENDPOINT__ (a Chrome\n" +
+    "DevTools Protocol endpoint) — do not spawn your own browser. This is \"monica\":\n" +
+    "pages you open show up as live panes I can see and drive. Create pages with\n" +
+    "newPage(); to drive an existing pane, attach to a target of type \"webview\".",
+};
+const promptText = (key) => (PROMPTS[key] || "").replace(/__ENDPOINT__/g, cdpEndpoint);
+
+function renderWelcome() {
+  const ep = document.getElementById("ep-inline");
+  if (ep) ep.textContent = cdpEndpoint;
+  document.querySelectorAll("pre.prompt[data-prompt-text]").forEach((pre) => {
+    pre.textContent = promptText(pre.dataset.promptText);
+  });
+}
+
 function applyCdpState({ mode, port, lanIp }) {
   const lan = mode === "lan";
   const host = lan ? lanIp : "127.0.0.1";
@@ -503,7 +541,20 @@ function applyCdpState({ mode, port, lanIp }) {
   cdpBadge.textContent = cdpLabel;
   cdpBadge.classList.toggle("lan", lan);
   cdpToggle.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
+  renderWelcome();
 }
+
+// Copy buttons on the welcome backdrop (endpoint + example prompts).
+backdrop.addEventListener("click", (e) => {
+  const btn = e.target.closest("button.lnk");
+  if (!btn) return;
+  const text = btn.dataset.copy === "endpoint" ? cdpEndpoint : btn.dataset.prompt ? promptText(btn.dataset.prompt) : null;
+  if (text == null) return;
+  window.api?.copy?.(text);
+  const prev = btn.textContent;
+  btn.textContent = "Copied ✓";
+  setTimeout(() => (btn.textContent = prev), 1000);
+});
 
 async function initCdpToggle() {
   if (!window.api?.getCdpMode) return;
@@ -525,7 +576,11 @@ cdpToggle.addEventListener("click", async (e) => {
 // ---- boot ------------------------------------------------------------------
 
 window.api?.onSplit((dir) => splitSelected(dir));
-window.api?.onClosePane(() => { if (active && active.selectedId) closeLeafAnywhere(active.selectedId); });
+window.api?.onClosePane(() => {
+  if (active && leafIn(active.root, active.selectedId)) { closeLeafAnywhere(active.selectedId); return; } // close selected pane
+  if (active) { closeTab(active); return; } // empty tab → close it
+  window.api?.confirmQuit?.(); // no tabs → offer to quit (confirmed via dialog in main)
+});
 window.api?.onReloadPane(() => reloadSelected());
 window.api?.onNavBack?.(() => navBack());
 window.api?.onNavForward?.(() => navForward());
@@ -535,4 +590,5 @@ window.addEventListener("resize", () => positionAll());
 
 renderTabs();
 layout(); // no tabs yet → shows the backdrop
+renderWelcome();
 initCdpToggle();

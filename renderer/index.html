@@ -22,9 +22,40 @@
 
     <main id="stage">
       <div id="backdrop">
-        <div class="bd-mark">monica</div>
-        <input id="backdrop-go" placeholder="Enter a URL or search…" spellcheck="false" />
-        <div class="bd-hint"><kbd>⌘T</kbd> new tab</div>
+        <div class="welcome">
+          <div class="bd-mark">monica</div>
+          <div class="bd-tag">a cockpit for browsers your agents drive — watch them live, take over anytime</div>
+
+          <input id="backdrop-go" placeholder="Enter a URL or search…" spellcheck="false" />
+          <div class="bd-hint">
+            <kbd>⌘T</kbd> new tab · <kbd>⌘D</kbd>/<kbd>⌘⇧D</kbd> split ·
+            <kbd>⌘←</kbd>/<kbd>⌘→</kbd> back/forward · <kbd>⌘W</kbd> close
+          </div>
+
+          <section class="howto">
+            <h2>Connect an agent</h2>
+            <p>
+              monica exposes a Chrome DevTools Protocol endpoint at
+              <code id="ep-inline">http://127.0.0.1:9222</code>
+              <button class="lnk" data-copy="endpoint">copy</button>.
+              Point any CDP client at it — pages it opens become panes you can watch and drive.
+              Use the <b>Local / LAN</b> toggle (top-right) to reach it from another machine.
+            </p>
+
+            <div class="prompt-card">
+              <div class="prompt-head"><span>Paste into your agent — Puppeteer</span><button class="lnk copy-prompt" data-prompt="puppeteer">Copy</button></div>
+              <pre class="prompt" data-prompt-text="puppeteer"></pre>
+            </div>
+            <div class="prompt-card">
+              <div class="prompt-head"><span>Paste into your agent — agent-browser</span><button class="lnk copy-prompt" data-prompt="agentBrowser">Copy</button></div>
+              <pre class="prompt" data-prompt-text="agentBrowser"></pre>
+            </div>
+            <div class="prompt-card">
+              <div class="prompt-head"><span>Paste into your agent — any CDP / MCP tool</span><button class="lnk copy-prompt" data-prompt="generic">Copy</button></div>
+              <pre class="prompt" data-prompt-text="generic"></pre>
+            </div>
+          </section>
+        </div>
       </div>
     </main>
 

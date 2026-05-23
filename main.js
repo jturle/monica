@@ -86,6 +86,22 @@ const proxyHooks = {
 
 ipcMain.on("clipboard:write", (_e, text) => clipboard.writeText(String(text ?? "")));
 
+let quitDialogOpen = false;
+ipcMain.on("app:confirm-quit", async (e) => {
+  if (quitDialogOpen) return;
+  quitDialogOpen = true;
+  const { response } = await dialog.showMessageBox(BrowserWindow.fromWebContents(e.sender), {
+    type: "question",
+    buttons: ["Cancel", "Quit monica"],
+    defaultId: 1,
+    cancelId: 0,
+    message: "Close monica?",
+    detail: "No tabs are open.",
+  });
+  quitDialogOpen = false;
+  if (response === 1) app.quit();
+});
+
 ipcMain.handle("cdp:get", () => ({ mode: cdpMode, port: PUBLIC_PORT, lanIp: firstLanIPv4() }));
 
 ipcMain.handle("cdp:set", async (e, requested) => {
