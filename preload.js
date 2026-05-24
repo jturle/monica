@@ -1,9 +1,9 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
-// Split/close/tab hotkeys come through the app menu (accelerators fire even when a
+// View/close/tab hotkeys come through the app menu (accelerators fire even when a
 // <webview> guest has keyboard focus — a plain renderer keydown listener would not).
 contextBridge.exposeInMainWorld("api", {
-  onSplit: (cb) => ipcRenderer.on("split", (_e, dir) => cb(dir)),
+  onToggleView: (cb) => ipcRenderer.on("toggle-view", () => cb()),
   onClosePane: (cb) => ipcRenderer.on("close-pane", () => cb()),
   onReloadPane: (cb) => ipcRenderer.on("reload-pane", () => cb()),
   onNavBack: (cb) => ipcRenderer.on("nav-back", () => cb()),

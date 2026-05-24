@@ -27,29 +27,43 @@ body { display: flex; flex-direction: column; }
 /* ---- top bar ---- */
 #topbar {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  height: 44px;
-  padding: 0 12px 0 84px; /* leave room for macOS traffic lights */
+  flex-direction: column;
   background: var(--panel);
   border-bottom: 1px solid var(--line);
   -webkit-app-region: drag;
 }
+.topbar-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 44px;
+  padding: 0 12px;
+}
+.topbar-row.controls { padding-left: 84px; } /* leave room for macOS traffic lights */
+.topbar-row.tabs-row {
+  height: 36px;
+  align-items: flex-end;
+  padding-bottom: 6px;
+  border-top: 1px solid var(--line);
+}
+/* collapse the tab strip entirely when there are no panes (welcome screen) */
+.tabs-row:has(.tabs:empty) { display: none; }
+
 #topbar .brand {
   font-weight: 600;
   letter-spacing: 0.5px;
   color: var(--accent);
 }
-#topbar .tabs {
+.tabs {
   display: flex;
   gap: 6px;
   -webkit-app-region: no-drag;
-  max-width: 55%;
+  width: 100%;
   overflow-x: auto;
   scrollbar-width: none;
 }
-#topbar .tabs::-webkit-scrollbar { display: none; }
-#topbar .tab {
+.tabs::-webkit-scrollbar { display: none; }
+.tabs .tab {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -62,9 +76,9 @@ body { display: flex; flex-direction: column; }
   white-space: nowrap;
   cursor: default;
 }
-#topbar .tab.active { color: var(--text); border-color: var(--accent-dim); }
-#topbar .tab .tname { max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
-#topbar .tab .tclose {
+.tabs .tab.active { color: var(--text); border-color: var(--accent-dim); }
+.tabs .tab .tname { max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+.tabs .tab .tclose {
   border: none;
   background: transparent;
   color: var(--muted);
@@ -75,9 +89,9 @@ body { display: flex; flex-direction: column; }
   border-radius: 4px;
   opacity: 0;
 }
-#topbar .tab:hover .tclose { opacity: 1; }
-#topbar .tab .tclose:hover { color: #ff6b6b; }
-#topbar .tab .tedit {
+.tabs .tab:hover .tclose { opacity: 1; }
+.tabs .tab .tclose:hover { color: #ff6b6b; }
+.tabs .tab .tedit {
   width: 120px;
   background: #05070b;
   border: 1px solid var(--accent-dim);
@@ -141,6 +155,25 @@ body { display: flex; flex-direction: column; }
 .cdp-toggle button.active { background: var(--accent-dim); color: #eafff9; }
 .cdp-toggle button[data-mode="lan"].active { background: #7a5e1e; color: #fff6df; }
 
+.view-toggle {
+  display: flex;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  overflow: hidden;
+  -webkit-app-region: no-drag;
+}
+.view-toggle button {
+  border: none;
+  background: #0d1018;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.view-toggle button + button { border-left: 1px solid var(--line-2); }
+.view-toggle button.active { background: var(--accent-dim); color: #eafff9; }
+
 /* ---- stage / panes ---- */
 #stage { position: relative; flex: 1; overflow: hidden; }
 
@@ -195,6 +228,10 @@ body { display: flex; flex-direction: column; }
 }
 .pane.selected { box-shadow: 0 0 0 2px var(--accent) inset; }
 
+/* tabs mode shows one pane edge-to-edge: no rounding, no selection ring */
+#stage[data-view="tabs"] .pane,
+#stage[data-view="tabs"] .pane.selected { border-radius: 0; box-shadow: none; }
+
 .pane-chrome {
   display: flex;
   align-items: center;
@@ -222,17 +259,6 @@ body { display: flex; flex-direction: column; }
 .pane-chrome .pclose:hover { color: #ff6b6b; }
 
 .pane webview { flex: 1; width: 100%; border: 0; background: #fff; }
-
-/* ---- dividers ---- */
-.divider { position: absolute; z-index: 5; background: transparent; }
-.divider:hover { background: var(--accent-dim); }
-.divider.row { cursor: col-resize; }
-.divider.col { cursor: row-resize; }
-
-/* While dragging a divider, let pointer events skip the webviews so the drag
-   keeps tracking even when the cursor passes over a guest page. */
-body.dragging { cursor: inherit; }
-body.dragging .pane webview { pointer-events: none; }
 
 /* ---- footer ---- */
 #hint {

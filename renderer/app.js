@@ -1,58 +1,59 @@
-// monica — tabs of tiling browser panes.
+// monica — a wall of browser panes.
 //
-// A TAB owns an independent pane tree (root may be null = empty) and its own
-// selection. A pane tree is a binary tree: a leaf is one browser (<webview>); a
-// split node arranges two children side-by-side (dir:"row") or stacked
-// (dir:"col"), with sizes[0] = the first child's fraction of the node's area.
+// A PANE is one browser (<webview>) and shows up as one pill in the top bar.
+// There is a single flat list of panes; no splitting, no per-tab trees. The same
+// list renders two ways (the view mode):
 //
-// There may be NO tabs at all — then `active` is null and the stage shows the
-// backdrop (shell UI, not a webview, so not a CDP target). User tabs (⌘T) start
-// with one blank (about:blank) pane. Connection tabs (an external CDP client
-// connecting) start EMPTY and fill as the client calls newPage().
+//   tabs  — only the selected pane is shown, full-bleed; pills switch between them.
+//   grid  — every pane is shown at once, auto-tiled. The grid dimensions follow
+//           the pane count and the window's aspect ratio: ceil(sqrt(n)) cells along
+//           the long axis, so 1, 2, 4, 6, 9… panes give 1x1, 2x1, 2x2, 3x2, 3x3…
+//           (transposed when the window is portrait). Recomputed on every resize.
 //
-// Every pane is absolutely positioned in #stage; only the active tab's panes
-// show. Re-layout only updates styles, so a <webview> is never reparented.
+// With NO panes the stage shows the backdrop (shell UI, not a webview, so not a
+// CDP target). User panes (⌘T) start blank (about:blank). Connection panes (an
+// external CDP client calling newPage()) are created on demand and named after
+// the client's ?session=.
+//
+// Every pane is absolutely positioned in #stage; layout only updates styles, so a
+// <webview> is never reparented.
 
 const stage = document.getElementById("stage");
 const omnibox = document.getElementById("omnibox");
 const tabsBar = document.getElementById("tabs");
 const backdrop = document.getElementById("backdrop");
 const backdropGo = document.getElementById("backdrop-go");
+const viewToggle = document.getElementById("view-toggle");
 
-const GUTTER = 6;
+const GUTTER = 6; // gap between grid cells
+const OUTER = 8; // grid margin to the stage edge
 const BLANK = "about:blank";
 const isBlank = (u) => !u || u === BLANK;
 const dlog = (scope, msg) => window.api?.log?.(scope, msg); // -> monica-debug.log
 
-let tabSeq = 0;
-let leafSeq = 0;
+let paneSeq = 0; // pane ids (also the "leafId" the proxy uses)
+let userSeq = 0; // friendly numbering for ⌘T panes
+let panes = []; // [{ id, name, kind:"user"|"conn", url, session, connectionId }]
+let selectedId = null;
+let viewMode = "tabs";
 
-const makeLeaf = (tab, url = BLANK) => ({ type: "leaf", id: ++leafSeq, n: ++tab.n, url });
+const paneEls = new Map(); // pane id -> .pane element
+const connSessions = new Map(); // connectionId -> session label
+const sessionCounts = new Map(); // session label -> panes created (stable naming)
 
-function makeTab(name, url) {
-  const t = { id: ++tabSeq, name: name || "tab-" + tabSeq, root: null, selectedId: null, n: 0, kind: "user" };
-  const leaf = makeLeaf(t, url || BLANK);
-  t.root = leaf;
-  t.selectedId = leaf.id;
-  return t;
-}
-function makeEmptyTab(name) {
-  return { id: ++tabSeq, name: name || "tab-" + tabSeq, root: null, selectedId: null, n: 0, kind: "conn" };
-}
-
-let tabs = [];
-let active = null;
-
-const paneEls = new Map(); // leaf id -> .pane element (across all tabs)
-let dividerEls = []; // parallel to rectsOf(active.root).dividers order
-const connTabs = new Map(); // connectionId -> tab
+const paneById = (id) => panes.find((p) => p.id === id) || null;
 
 // ---- naming ----------------------------------------------------------------
 
 function slug(name) {
-  return name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "tab";
+  return name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "pane";
 }
-const labelFor = (tab, leaf) => slug(tab.name) + "-" + leaf.n;
+// nth page of a session: first uses the bare session name, rest get a suffix.
+function sessionPaneName(session) {
+  const c = (sessionCounts.get(session) || 0) + 1;
+  sessionCounts.set(session, c);
+  return c === 1 ? session : session + " " + c;
+}
 
 // ---- url normalization -----------------------------------------------------
 
@@ -64,112 +65,52 @@ function normalizeUrl(u) {
   return looksLikeHost ? "https://" + u : "https://www.google.com/search?q=" + encodeURIComponent(u);
 }
 
-// ---- tree helpers ----------------------------------------------------------
-
-function walkLeaves(node, cb) {
-  if (!node) return;
-  if (node.type === "leaf") cb(node);
-  else node.children.forEach((c) => walkLeaves(c, cb));
-}
-function leafIn(node, id) {
-  let found = null;
-  walkLeaves(node, (l) => { if (l.id === id) found = l; });
-  return found;
-}
-function firstLeaf(n) {
-  return n.type === "leaf" ? n : firstLeaf(n.children[0]);
-}
-function tabOf(leafId) {
-  return tabs.find((t) => leafIn(t.root, leafId)) || null;
-}
-
-// Pixel rects for leaves/dividers of a node, using the stage size as canvas.
-function rectsOf(node) {
-  const W = stage.clientWidth || 1280;
-  const H = stage.clientHeight || 800;
-  const leaves = [];
-  const dividers = [];
-  (function walk(n, x, y, w, h) {
-    if (!n) return;
-    if (n.type === "leaf") { leaves.push({ id: n.id, leaf: n, rect: { x, y, w, h } }); return; }
-    const s = n.sizes[0];
-    if (n.dir === "row") {
-      const wa = (w - GUTTER) * s, wb = (w - GUTTER) * (1 - s);
-      walk(n.children[0], x, y, wa, h);
-      dividers.push({ node: n, dir: "row", rect: { x: x + wa, y, w: GUTTER, h } });
-      walk(n.children[1], x + wa + GUTTER, y, wb, h);
-    } else {
-      const ha = (h - GUTTER) * s, hb = (h - GUTTER) * (1 - s);
-      walk(n.children[0], x, y, w, ha);
-      dividers.push({ node: n, dir: "col", rect: { x, y: y + ha, w, h: GUTTER } });
-      walk(n.children[1], x, y + ha + GUTTER, w, hb);
-    }
-  })(node, 0, 0, W, H);
-  return { leaves, dividers };
-}
-
-function nodeArea(root, target) {
-  let res = null;
-  const W = stage.clientWidth || 1280, H = stage.clientHeight || 800;
-  (function walk(n, x, y, w, h) {
-    if (n === target) { res = { x, y, w, h }; return; }
-    if (!n || n.type !== "split") return;
-    const s = n.sizes[0];
-    if (n.dir === "row") {
-      const wa = (w - GUTTER) * s;
-      walk(n.children[0], x, y, wa, h);
-      walk(n.children[1], x + wa + GUTTER, y, (w - GUTTER) * (1 - s), h);
-    } else {
-      const ha = (h - GUTTER) * s;
-      walk(n.children[0], x, y, w, ha);
-      walk(n.children[1], x, y + ha + GUTTER, w, (h - GUTTER) * (1 - s));
-    }
-  })(root, 0, 0, W, H);
-  return res || { x: 0, y: 0, w: W, h: H };
-}
-
 // ---- DOM: panes ------------------------------------------------------------
 
-function createPane(tab, leaf) {
-  if (paneEls.has(leaf.id)) return paneEls.get(leaf.id);
+function createPaneEl(p) {
+  if (paneEls.has(p.id)) return paneEls.get(p.id);
   const el = document.createElement("div");
   el.className = "pane";
-  el.dataset.id = String(leaf.id);
-  el.dataset.tab = String(tab.id);
+  el.dataset.id = String(p.id);
 
   const chrome = document.createElement("div");
   chrome.className = "pane-chrome";
   chrome.innerHTML =
     '<span class="dot"></span><span class="pname"></span><span class="ptitle"></span><button class="pclose" title="Close pane">×</button>';
-  const pname = chrome.querySelector(".pname");
-  const ptitle = chrome.querySelector(".ptitle");
-  pname.textContent = labelFor(tab, leaf);
-  ptitle.textContent = isBlank(leaf.url) ? "new tab" : "";
+  chrome.querySelector(".pname").textContent = p.name;
+  chrome.querySelector(".ptitle").textContent = isBlank(p.url) ? "new tab" : "";
 
   const wv = document.createElement("webview");
-  wv.setAttribute("partition", "persist:pane-" + leaf.id); // stable isolation, independent of name
+  wv.setAttribute("partition", "persist:pane-" + p.id); // stable isolation, independent of name
   wv.setAttribute("allowpopups", "");
-  wv.setAttribute("src", leaf.url);
+  wv.setAttribute("src", p.url);
 
   el.appendChild(chrome);
   el.appendChild(wv);
   stage.appendChild(el);
 
-  chrome.addEventListener("mousedown", () => select(leaf.id));
-  chrome.querySelector(".pclose").addEventListener("click", (e) => { e.stopPropagation(); closeLeafAnywhere(leaf.id); });
+  chrome.addEventListener("mousedown", () => select(p.id));
+  chrome.querySelector(".pclose").addEventListener("click", (e) => { e.stopPropagation(); closePane(p.id); });
 
-  wv.addEventListener("focus", () => select(leaf.id));
+  wv.addEventListener("focus", () => select(p.id));
   wv.addEventListener("page-title-updated", (e) => {
-    pname.textContent = labelFor(tabOf(leaf.id) || tab, leaf);
-    ptitle.textContent = e.title || (isBlank(leaf.url) ? "new tab" : leaf.url);
+    chrome.querySelector(".pname").textContent = p.name;
+    chrome.querySelector(".ptitle").textContent = e.title || (isBlank(p.url) ? "new tab" : p.url);
   });
-  const setUrl = (u) => { leaf.url = u; if (active && leaf.id === active.selectedId) omnibox.value = isBlank(u) ? "" : u; };
+  const setUrl = (u) => { p.url = u; if (p.id === selectedId) omnibox.value = isBlank(u) ? "" : u; };
   wv.addEventListener("did-navigate", (e) => setUrl(e.url));
   wv.addEventListener("did-navigate-in-page", (e) => setUrl(e.url));
 
-  paneEls.set(leaf.id, el);
-  dlog("pane", "create leaf=" + leaf.id + " tab=" + tab.name + " url=" + leaf.url);
+  paneEls.set(p.id, el);
+  dlog("pane", "create id=" + p.id + " name=" + p.name + " url=" + p.url);
   return el;
+}
+
+function makePane({ name, url = BLANK, kind = "user", session = null, connectionId = null }) {
+  const p = { id: ++paneSeq, name, kind, url, session, connectionId };
+  panes.push(p);
+  createPaneEl(p);
+  return p;
 }
 
 function setRect(el, r) {
@@ -177,162 +118,119 @@ function setRect(el, r) {
   el.style.width = r.w + "px"; el.style.height = r.h + "px";
 }
 
-function positionAll() {
-  if (!active || !active.root) return;
-  const { leaves, dividers } = rectsOf(active.root);
-  leaves.forEach(({ id, rect }) => { const el = paneEls.get(id); if (el) setRect(el, rect); });
-  dividers.forEach((d, i) => { if (dividerEls[i]) setRect(dividerEls[i], d.rect); });
+// ---- layout ----------------------------------------------------------------
+
+// cols x rows for n panes given the stage aspect ratio. ceil(sqrt(n)) cells run
+// along the long axis; the short axis gets just enough rows to fit.
+function gridDims(n, W, H) {
+  const primary = Math.max(1, Math.ceil(Math.sqrt(n)));
+  const secondary = Math.ceil(n / primary);
+  return W >= H ? { cols: primary, rows: secondary } : { cols: secondary, rows: primary };
+}
+
+function positionPanes() {
+  const W = stage.clientWidth || 1280;
+  const H = stage.clientHeight || 800;
+
+  if (viewMode === "tabs") {
+    for (const p of panes) {
+      const el = paneEls.get(p.id);
+      if (!el) continue;
+      if (p.id === selectedId) { el.style.display = ""; setRect(el, { x: 0, y: 0, w: W, h: H }); }
+      else el.style.display = "none";
+    }
+    return;
+  }
+
+  const n = panes.length;
+  if (!n) return;
+  const { cols, rows } = gridDims(n, W, H);
+  const cellW = (W - OUTER * 2 - GUTTER * (cols - 1)) / cols;
+  const cellH = (H - OUTER * 2 - GUTTER * (rows - 1)) / rows;
+  panes.forEach((p, i) => {
+    const el = paneEls.get(p.id);
+    if (!el) return;
+    el.style.display = "";
+    const r = Math.floor(i / cols);
+    const c = i % cols;
+    const itemsInRow = r === rows - 1 ? n - cols * (rows - 1) : cols;
+    const rowPad = ((cols - itemsInRow) * (cellW + GUTTER)) / 2; // centre a short last row
+    setRect(el, {
+      x: OUTER + rowPad + c * (cellW + GUTTER),
+      y: OUTER + r * (cellH + GUTTER),
+      w: cellW,
+      h: cellH,
+    });
+  });
 }
 
 function updateBackdrop() {
-  backdrop.classList.toggle("hidden", !!(active && active.root));
+  backdrop.classList.toggle("hidden", panes.length > 0);
 }
 
 function layout() {
-  for (const [, el] of paneEls) {
-    el.style.display = active && el.dataset.tab === String(active.id) ? "" : "none";
-  }
-  dividerEls.forEach((d) => d.remove());
-  dividerEls = [];
+  if (panes.length && !paneById(selectedId)) selectedId = panes[0].id;
+  if (!panes.length) selectedId = null;
   updateBackdrop();
-  if (!active || !active.root) return;
-  const { leaves, dividers } = rectsOf(active.root);
-  leaves.forEach(({ id, leaf }) => { if (!paneEls.has(id)) createPane(active, leaf); });
-  dividerEls = dividers.map((d) => makeDivider(active.root, d));
-  positionAll();
+  positionPanes();
+  for (const [, el] of paneEls) el.classList.toggle("selected", el.dataset.id === String(selectedId));
 }
 
-// ---- DOM: dividers ---------------------------------------------------------
+// ---- selection -------------------------------------------------------------
 
-function makeDivider(root, d) {
-  const el = document.createElement("div");
-  el.className = "divider " + d.dir;
-  stage.appendChild(el);
+function select(id) {
+  if (!paneById(id)) return;
+  selectedId = id;
+  for (const [, el] of paneEls) el.classList.toggle("selected", el.dataset.id === String(id));
+  if (viewMode === "tabs") positionPanes(); // show the newly selected pane
+  syncOmnibox();
+  renderTabs();
+}
 
-  el.addEventListener("pointerdown", (ev) => {
-    ev.preventDefault();
-    const horiz = d.dir === "row";
-    const stageBox = stage.getBoundingClientRect();
-    document.body.classList.add("dragging");
-    el.setPointerCapture(ev.pointerId);
-    const onMove = (e) => {
-      const area = nodeArea(root, d.node);
-      const ratio = horiz
-        ? (e.clientX - stageBox.left - area.x) / area.w
-        : (e.clientY - stageBox.top - area.y) / area.h;
-      d.node.sizes[0] = Math.min(0.9, Math.max(0.1, ratio));
-      positionAll();
-    };
-    const onUp = () => {
-      document.body.classList.remove("dragging");
-      el.releasePointerCapture(ev.pointerId);
-      el.removeEventListener("pointermove", onMove);
-      el.removeEventListener("pointerup", onUp);
-    };
-    el.addEventListener("pointermove", onMove);
-    el.addEventListener("pointerup", onUp);
-  });
-  return el;
+function syncOmnibox() {
+  const p = paneById(selectedId);
+  omnibox.value = p && !isBlank(p.url) ? p.url : "";
 }
 
 // ---- pane operations -------------------------------------------------------
 
-function select(id) {
-  if (!active) return;
-  active.selectedId = id;
-  for (const [, el] of paneEls) {
-    if (el.dataset.tab === String(active.id)) el.classList.toggle("selected", el.dataset.id === String(id));
-  }
-  const lf = leafIn(active.root, id);
-  omnibox.value = lf && !isBlank(lf.url) ? lf.url : "";
+function newUserPane(url = BLANK) {
+  const p = makePane({ name: "tab-" + ++userSeq, url, kind: "user" });
+  selectedId = p.id;
+  layout();
+  select(p.id);
+  return p;
 }
 
-// Add a pane to a tab (auto-tiles by splitting the largest pane along its long
-// axis). Returns the new leaf.
-function addPaneToTab(tab, url = BLANK) {
-  let leaf;
-  if (!tab.root) {
-    leaf = makeLeaf(tab, url);
-    tab.root = leaf;
-  } else {
-    const { leaves } = rectsOf(tab.root);
-    leaves.sort((a, b) => b.rect.w * b.rect.h - a.rect.w * a.rect.h);
-    const target = leaves[0];
-    const dir = target.rect.w >= target.rect.h ? "row" : "col";
-    tab.root = (function rep(n) {
-      if (n.type === "leaf") {
-        if (n.id !== target.id) return n;
-        leaf = makeLeaf(tab, url);
-        return { type: "split", dir, sizes: [0.5, 0.5], children: [n, leaf] };
-      }
-      n.children = n.children.map(rep);
-      return n;
-    })(tab.root);
-  }
-  tab.selectedId = leaf.id;
-  createPane(tab, leaf); // ensure the webview exists now so its CDP target registers
-  if (active === tab) { layout(); select(leaf.id); }
-  return leaf;
+function addPane() {
+  newUserPane(BLANK);
+  omnibox.focus();
+  omnibox.select();
 }
 
-function splitSelected(dir) {
-  if (!active) return;
-  if (!active.root) { addPaneToTab(active); return; }
-  let newId = null;
-  active.root = (function replace(n) {
-    if (n.type === "leaf") {
-      if (n.id !== active.selectedId) return n;
-      const nl = makeLeaf(active);
-      newId = nl.id;
-      return { type: "split", dir, sizes: [0.5, 0.5], children: [n, nl] };
-    }
-    n.children = n.children.map(replace);
-    return n;
-  })(active.root);
-  if (newId !== null) { layout(); select(newId); }
-}
-
-function closeLeafInTab(tab, id) {
-  if (!tab.root) return;
-  dlog("pane", "close leaf=" + id + " tab=" + tab.name);
-  if (tab.root.type === "leaf" && tab.root.id === id) {
-    if (tab.kind === "user") { closeTab(tab); return; } // last pane of a user tab → drop the tab
-    const el = paneEls.get(id);
-    if (el) { el.remove(); paneEls.delete(id); }
-    tab.root = null;
-    tab.selectedId = null;
-    if (active === tab) layout(); // connection tab: keep it (empty) for the next newPage()
-    return;
-  }
-  tab.root = (function remove(n) {
-    if (n.type === "leaf") return n;
-    const [a, b] = n.children;
-    if (a.type === "leaf" && a.id === id) return b;
-    if (b.type === "leaf" && b.id === id) return a;
-    n.children = [remove(a), remove(b)];
-    return n;
-  })(tab.root);
+function closePane(id) {
+  const p = paneById(id);
+  if (!p) return;
+  dlog("pane", "close id=" + id + " name=" + p.name);
   const el = paneEls.get(id);
   if (el) { el.remove(); paneEls.delete(id); }
-  if (!leafIn(tab.root, tab.selectedId)) tab.selectedId = firstLeaf(tab.root).id;
-  if (active === tab) { layout(); select(tab.selectedId); }
-}
-
-function closeLeafAnywhere(id) {
-  const t = tabOf(id);
-  if (t) closeLeafInTab(t, id);
+  const idx = panes.indexOf(p);
+  panes.splice(idx, 1);
+  if (selectedId === id) selectedId = panes[Math.min(idx, panes.length - 1)]?.id ?? null;
+  layout();
+  renderTabs();
+  syncOmnibox();
 }
 
 function selectedWebview() {
-  return active ? paneEls.get(active.selectedId)?.querySelector("webview") : null;
+  return paneEls.get(selectedId)?.querySelector("webview") || null;
 }
 function editingText() {
   const a = document.activeElement;
   return !!a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.isContentEditable);
 }
 function reloadSelected() {
-  const wv = selectedWebview();
-  if (wv) wv.reload();
+  selectedWebview()?.reload();
 }
 function navBack() {
   if (editingText()) return; // don't hijack ⌘← while typing in the omnibox
@@ -345,44 +243,45 @@ function navForward() {
   if (wv && wv.canGoForward()) wv.goForward();
 }
 
-// ---- tab operations --------------------------------------------------------
+// ---- top-bar pills ---------------------------------------------------------
 
 function renderTabs() {
   tabsBar.innerHTML = "";
-  tabs.forEach((t) => {
+  panes.forEach((p) => {
     const pill = document.createElement("div");
-    pill.className = "tab" + (t === active ? " active" : "");
+    pill.className = "tab" + (p.id === selectedId ? " active" : "");
     pill.title = "Double-click to rename";
 
     const name = document.createElement("span");
     name.className = "tname";
-    name.textContent = t.name;
+    name.textContent = p.name;
 
     const close = document.createElement("button");
     close.className = "tclose";
     close.textContent = "×";
-    close.title = "Close tab";
+    close.title = "Close pane";
 
     pill.append(name, close);
     tabsBar.appendChild(pill);
 
-    pill.addEventListener("mousedown", (e) => { if (e.target !== close) setActive(t); });
-    pill.addEventListener("dblclick", (e) => { if (e.target !== close) beginRename(t, pill, name); });
-    close.addEventListener("click", (e) => { e.stopPropagation(); closeTab(t); });
+    pill.addEventListener("mousedown", (e) => { if (e.target !== close) select(p.id); });
+    pill.addEventListener("dblclick", (e) => { if (e.target !== close) beginRename(p, pill, name); });
+    close.addEventListener("click", (e) => { e.stopPropagation(); closePane(p.id); });
   });
 }
 
-function beginRename(tab, pill, nameEl) {
+function beginRename(p, pill, nameEl) {
   const input = document.createElement("input");
   input.className = "tedit";
-  input.value = tab.name;
+  input.value = p.name;
   pill.replaceChild(input, nameEl);
   input.focus();
   input.select();
   const commit = () => {
     const v = input.value.trim();
-    if (v) tab.name = v;
-    refreshTabNaming(tab);
+    if (v) p.name = v;
+    const el = paneEls.get(p.id);
+    if (el) el.querySelector(".pname").textContent = p.name;
     renderTabs();
   };
   input.addEventListener("keydown", (e) => {
@@ -392,46 +291,16 @@ function beginRename(tab, pill, nameEl) {
   input.addEventListener("blur", commit);
 }
 
-function refreshTabNaming(tab) {
-  document.querySelectorAll('.pane[data-tab="' + tab.id + '"]').forEach((el) => {
-    const leaf = leafIn(tab.root, +el.dataset.id);
-    if (!leaf) return;
-    el.querySelector(".pname").textContent = labelFor(tab, leaf);
-  });
-}
+// ---- view mode -------------------------------------------------------------
 
-function setActive(tab) {
-  if (tab === active) return;
-  active = tab;
+function setView(mode) {
+  viewMode = mode === "grid" ? "grid" : "tabs";
+  stage.dataset.view = viewMode;
+  viewToggle?.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.view === viewMode));
   layout();
-  if (active && active.selectedId) select(active.selectedId);
-  else omnibox.value = "";
-  renderTabs();
 }
-
-function addTab() {
-  const t = makeTab(); // user tab with one blank pane
-  tabs.push(t);
-  setActive(t);
-  renderTabs();
-  omnibox.focus(); // ready to type a URL immediately
-  omnibox.select();
-}
-
-function closeTab(tab) {
-  dlog("tab", "close " + tab.name);
-  walkLeaves(tab.root, (l) => { const el = paneEls.get(l.id); if (el) { el.remove(); paneEls.delete(l.id); } });
-  const idx = tabs.indexOf(tab);
-  if (idx === -1) return;
-  tabs.splice(idx, 1);
-  for (const [cid, t] of connTabs) if (t === tab) connTabs.delete(cid);
-  if (active === tab) {
-    active = tabs[Math.min(idx, tabs.length - 1)] || null; // may be null → backdrop
-    layout();
-    if (active && active.selectedId) select(active.selectedId);
-    else omnibox.value = "";
-  }
-  renderTabs();
+function toggleView() {
+  setView(viewMode === "grid" ? "tabs" : "grid");
 }
 
 // ---- omnibox + backdrop entry ----------------------------------------------
@@ -440,17 +309,9 @@ omnibox.addEventListener("keydown", (e) => {
   if (e.key !== "Enter") return;
   const u = normalizeUrl(omnibox.value);
   if (!u) return;
-  if (!active) {
-    // no tabs open → create one navigated to the entry
-    const t = makeTab(undefined, u);
-    tabs.push(t);
-    setActive(t);
-    renderTabs();
-    return;
-  }
-  const lf = leafIn(active.root, active.selectedId);
-  if (!lf) { addPaneToTab(active, u); renderTabs(); return; } // empty tab → add a pane
-  const wv = paneEls.get(lf.id)?.querySelector("webview");
+  const p = paneById(selectedId);
+  if (!p) { newUserPane(u); return; } // no panes → open one navigated to the entry
+  const wv = paneEls.get(p.id)?.querySelector("webview");
   if (wv) wv.src = u;
 });
 
@@ -458,10 +319,7 @@ backdropGo.addEventListener("keydown", (e) => {
   if (e.key !== "Enter") return;
   const u = normalizeUrl(backdropGo.value);
   if (!u) return;
-  const t = makeTab(undefined, u); // open a new tab navigated to the entry
-  tabs.push(t);
-  setActive(t);
-  renderTabs();
+  newUserPane(u);
   backdropGo.value = "";
 });
 
@@ -469,52 +327,56 @@ backdropGo.addEventListener("keydown", (e) => {
 
 window.api?.onProxyConnectionOpen?.(({ connectionId, label }) => {
   dlog("conn", "open #" + connectionId + " " + label);
-  // Resume: reuse an existing tab with the same name (a ?label= session
-  // reconnecting) instead of spawning a duplicate. Its retained panes are still
-  // alive and the proxy still scopes them to this label, so the client's
-  // getTargets returns them and re-attaches.
-  let t = tabs.find((x) => x.name === label);
-  if (t) dlog("conn", "resume tab " + label);
-  else { t = makeEmptyTab(label); tabs.push(t); }
-  t.kind = "conn";
-  connTabs.set(connectionId, t);
-  setActive(t);
-  renderTabs();
+  connSessions.set(connectionId, label);
+  // Adopt any still-live panes of this session (e.g. a second concurrent client on
+  // the same ?session=). Named-session panes are discarded when their connection
+  // drops (see proxy.js), so a reconnect after close finds none — by design.
+  const adopted = panes.filter((p) => p.session === label);
+  adopted.forEach((p) => { p.kind = "conn"; p.connectionId = connectionId; });
+  if (adopted.length) {
+    dlog("conn", "adopt " + label + " (" + adopted.length + " panes)");
+    selectedId = adopted[0].id;
+    layout();
+    select(adopted[0].id);
+  }
 });
 
 window.api?.onProxyConnectionLabel?.((connectionId, label) => {
-  const t = connTabs.get(connectionId);
-  if (t) { t.name = label; refreshTabNaming(t); renderTabs(); }
+  const old = connSessions.get(connectionId);
+  connSessions.set(connectionId, label);
+  if (!old || old === label) return;
+  panes
+    .filter((p) => p.connectionId === connectionId && (p.name === old || p.name.startsWith(old + " ")))
+    .forEach((p) => {
+      p.name = label + p.name.slice(old.length);
+      p.session = label;
+      const el = paneEls.get(p.id);
+      if (el) el.querySelector(".pname").textContent = p.name;
+    });
+  renderTabs();
 });
 
 window.api?.onProxyConnectionClose?.((connectionId) => {
-  // Retain on disconnect (CDP: disconnect = detach, not close). Detach the tab
-  // from the dead connection so it behaves like a normal tab; its panes stay live
-  // and re-attachable, and close only via page.close() or manually.
-  const t = connTabs.get(connectionId);
-  if (!t) return;
-  connTabs.delete(connectionId);
-  t.kind = "user";
+  // Retain on disconnect (CDP: disconnect = detach, not close). The panes stay
+  // live and re-attachable; only page.close() removes one. Detach them from the
+  // dead connection so they behave like normal panes.
+  panes.filter((p) => p.connectionId === connectionId).forEach((p) => { p.kind = "user"; p.connectionId = null; });
+  connSessions.delete(connectionId);
+  renderTabs();
 });
 
 window.api?.onProxyCreatePane?.(({ connectionId, url, reqId }) => {
-  dlog("conn", "create-pane #" + connectionId + " url=" + (url || BLANK));
-  let t = connTabs.get(connectionId);
-  if (!t) {
-    // Connection tab missing (e.g. user closed it while the client stayed
-    // connected). Make a fresh one and activate it so the pane actually lays out.
-    t = makeEmptyTab("agent");
-    tabs.push(t);
-    connTabs.set(connectionId, t);
-    setActive(t);
-    renderTabs();
-  }
-  const leaf = addPaneToTab(t, url || BLANK);
-  renderTabs();
-  window.api.replyCreatePane(reqId, leaf.id);
+  const session = connSessions.get(connectionId) || "agent";
+  if (!connSessions.has(connectionId)) connSessions.set(connectionId, session);
+  dlog("conn", "create-pane #" + connectionId + " session=" + session + " url=" + (url || BLANK));
+  const p = makePane({ name: sessionPaneName(session), url: url || BLANK, kind: "conn", session, connectionId });
+  selectedId = p.id;
+  layout(); // size the webview before we hand its id back, so its CDP target isn't 0x0
+  select(p.id);
+  window.api.replyCreatePane(reqId, p.id);
 });
 
-window.api?.onProxyClosePane?.((leafId) => closeLeafAnywhere(leafId));
+window.api?.onProxyClosePane?.((leafId) => closePane(leafId));
 
 // ---- CDP bind toggle + copy ------------------------------------------------
 
@@ -598,22 +460,27 @@ cdpToggle.addEventListener("click", async (e) => {
   if (b && window.api?.setCdpMode) applyCdpState(await window.api.setCdpMode(b.dataset.mode));
 });
 
+viewToggle?.addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (b) setView(b.dataset.view);
+});
+
 // ---- boot ------------------------------------------------------------------
 
-window.api?.onSplit((dir) => splitSelected(dir));
+window.api?.onToggleView?.(() => toggleView());
 window.api?.onClosePane(() => {
-  if (active && leafIn(active.root, active.selectedId)) { closeLeafAnywhere(active.selectedId); return; } // close selected pane
-  if (active) { closeTab(active); return; } // empty tab → close it
-  window.api?.confirmQuit?.(); // no tabs → offer to quit (confirmed via dialog in main)
+  if (selectedId != null) closePane(selectedId);
+  else window.api?.confirmQuit?.(); // no panes → offer to quit (confirmed via dialog in main)
 });
 window.api?.onReloadPane(() => reloadSelected());
 window.api?.onNavBack?.(() => navBack());
 window.api?.onNavForward?.(() => navForward());
-window.api?.onNewTab(() => addTab());
-window.api?.onCloseTab(() => { if (active) closeTab(active); });
-window.addEventListener("resize", () => positionAll());
+window.api?.onNewTab(() => addPane());
+window.api?.onCloseTab(() => { if (selectedId != null) closePane(selectedId); });
+window.addEventListener("resize", () => positionPanes());
 
+setView("tabs");
 renderTabs();
-layout(); // no tabs yet → shows the backdrop
+layout(); // no panes yet → shows the backdrop
 renderWelcome();
 initCdpToggle();

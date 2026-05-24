@@ -8,15 +8,23 @@
   </head>
   <body>
     <header id="topbar">
-      <div class="brand">monica</div>
-      <div class="tabs" id="tabs"></div>
-      <input id="omnibox" placeholder="Enter URL and press Enter…" spellcheck="false" />
-      <div class="cdp-group">
-        <span class="cdp" id="cdp-badge" title="Chrome DevTools Protocol endpoint">CDP :9222</span>
-        <div class="cdp-toggle" id="cdp-toggle" title="Re-bind CDP (restarts monica)">
-          <button data-mode="local" class="active">Local</button>
-          <button data-mode="lan">LAN</button>
+      <div class="topbar-row controls">
+        <div class="brand">monica</div>
+        <input id="omnibox" placeholder="Enter URL and press Enter…" spellcheck="false" />
+        <div class="seg view-toggle" id="view-toggle" title="Switch layout (⌘G)">
+          <button data-view="tabs" class="active">Tabs</button>
+          <button data-view="grid">Grid</button>
         </div>
+        <div class="cdp-group">
+          <span class="cdp" id="cdp-badge" title="Chrome DevTools Protocol endpoint">CDP :9222</span>
+          <div class="cdp-toggle" id="cdp-toggle" title="Re-bind CDP (restarts monica)">
+            <button data-mode="local" class="active">Local</button>
+            <button data-mode="lan">LAN</button>
+          </div>
+        </div>
+      </div>
+      <div class="topbar-row tabs-row">
+        <div class="tabs" id="tabs"></div>
       </div>
     </header>
 
@@ -28,7 +36,7 @@
 
           <input id="backdrop-go" placeholder="Enter a URL or search…" spellcheck="false" />
           <div class="bd-hint">
-            <kbd>⌘T</kbd> new tab · <kbd>⌘D</kbd>/<kbd>⌘⇧D</kbd> split ·
+            <kbd>⌘T</kbd> new tab · <kbd>⌘G</kbd> grid / tabs ·
             <kbd>⌘←</kbd>/<kbd>⌘→</kbd> back/forward · <kbd>⌘W</kbd> close
           </div>
 
@@ -61,7 +69,7 @@
 
     <footer id="hint">
       <kbd>⌘T</kbd> new tab · double-click a tab to rename ·
-      <kbd>⌘D</kbd> split right · <kbd>⌘⇧D</kbd> split down · drag dividers to resize ·
+      <kbd>⌘G</kbd> toggle grid / tabs · <kbd>⌘←</kbd>/<kbd>⌘→</kbd> back / forward ·
       <kbd>⌘R</kbd> reload pane · <kbd>⌘W</kbd> close pane
     </footer>
 

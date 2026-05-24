@@ -159,9 +159,6 @@ function buildMenu() {
     {
       label: "Pane",
       submenu: [
-        { label: "Split Right (side-by-side)", accelerator: "CmdOrCtrl+D", click: (_i, win) => send(win, "split", "row") },
-        { label: "Split Down (stacked)", accelerator: "CmdOrCtrl+Shift+D", click: (_i, win) => send(win, "split", "col") },
-        { type: "separator" },
         { label: "Back", accelerator: "CmdOrCtrl+Left", click: (_i, win) => send(win, "nav-back") },
         { label: "Forward", accelerator: "CmdOrCtrl+Right", click: (_i, win) => send(win, "nav-forward") },
         { type: "separator" },
@@ -172,6 +169,8 @@ function buildMenu() {
     {
       label: "View",
       submenu: [
+        { label: "Toggle Grid / Tabs", accelerator: "CmdOrCtrl+G", click: (_i, win) => send(win, "toggle-view") },
+        { type: "separator" },
         { label: "Reload App", accelerator: "CmdOrCtrl+Shift+R", role: "forceReload" },
         { role: "toggleDevTools" },
         { type: "separator" },
