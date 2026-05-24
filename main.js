@@ -121,6 +121,10 @@ ipcMain.handle("cdp:get", () => ({ mode: cdpMode, port: PUBLIC_PORT, lanIp: firs
 ipcMain.handle("view:get", () => (settings.view === "tabs" ? "tabs" : "grid"));
 ipcMain.on("view:set", (_e, mode) => savePref({ view: mode === "grid" ? "grid" : "tabs" }));
 
+// Theme (system|light|dark) — default system (follow the OS); resolved in the renderer.
+ipcMain.handle("theme:get", () => (["light", "dark"].includes(settings.theme) ? settings.theme : "system"));
+ipcMain.on("theme:set", (_e, t) => savePref({ theme: ["light", "dark"].includes(t) ? t : "system" }));
+
 ipcMain.handle("cdp:set", async (e, requested) => {
   const mode = requested === "lan" ? "lan" : "local";
   if (mode === cdpMode) return { mode: cdpMode, port: PUBLIC_PORT, lanIp: firstLanIPv4() };
