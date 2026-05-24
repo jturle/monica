@@ -24,7 +24,8 @@ function firstLanIPv4() {
 }
 const addrFor = (mode) => (mode === "lan" ? "0.0.0.0" : "127.0.0.1");
 
-const settings = readSettings();
+let settings = readSettings();
+function savePref(patch) { settings = { ...settings, ...patch }; writeSettings(settings); }
 let cdpMode = settings.cdpMode === "lan" ? "lan" : "local";
 
 // --- debug log: written to the project dir (truncated each launch) so it's easy
@@ -116,6 +117,10 @@ ipcMain.on("app:confirm-quit", async (e) => {
 
 ipcMain.handle("cdp:get", () => ({ mode: cdpMode, port: PUBLIC_PORT, lanIp: firstLanIPv4() }));
 
+// View mode (grid|tabs) persists in the same settings file as the CDP bind.
+ipcMain.handle("view:get", () => (settings.view === "tabs" ? "tabs" : "grid"));
+ipcMain.on("view:set", (_e, mode) => savePref({ view: mode === "grid" ? "grid" : "tabs" }));
+
 ipcMain.handle("cdp:set", async (e, requested) => {
   const mode = requested === "lan" ? "lan" : "local";
   if (mode === cdpMode) return { mode: cdpMode, port: PUBLIC_PORT, lanIp: firstLanIPv4() };
@@ -134,7 +139,7 @@ ipcMain.handle("cdp:set", async (e, requested) => {
   });
   if (response !== 1) return { mode: cdpMode, port: PUBLIC_PORT, lanIp: firstLanIPv4() };
   cdpMode = mode;
-  writeSettings({ ...settings, cdpMode: mode });
+  savePref({ cdpMode: mode });
   await proxy.setBind(addrFor(mode)); // live rebind — no relaunch
   log("app", "cdp rebind -> " + mode);
   return { mode: cdpMode, port: PUBLIC_PORT, lanIp: firstLanIPv4() };

@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld("api", {
 
   getCdpMode: () => ipcRenderer.invoke("cdp:get"),
   setCdpMode: (mode) => ipcRenderer.invoke("cdp:set", mode), // returns new {mode, port, lanIp}
+  getViewPref: () => ipcRenderer.invoke("view:get"),
+  setViewPref: (mode) => ipcRenderer.send("view:set", mode),
   copy: (text) => ipcRenderer.send("clipboard:write", text), // clipboard isn't available in a sandboxed preload
   confirmQuit: () => ipcRenderer.send("app:confirm-quit"),
   log: (scope, msg) => ipcRenderer.send("monica:log", scope, msg),
