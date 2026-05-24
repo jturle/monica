@@ -41,6 +41,10 @@ monica opens to a welcome screen showing its CDP endpoint
 copy-paste [agent-browser-mcp config](#agent-browser-mcp-recommended) — and the
 pages it opens appear as panes. Press **⌘G** to switch between grid and tabs.
 
+Prefer a real app? `yarn install:app` builds a local, branded `monica.app` and drops
+it in `/Applications` (macOS, unsigned — no release/notarization). `yarn package`
+just builds it under `dist/`.
+
 Sanity-check that panes are CDP-attachable:
 
 ```bash
