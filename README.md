@@ -12,6 +12,11 @@ Every pane is a real, attachable CDP target, so a remote `puppeteer.connect(...)
 `--remote-debugging-port`, or forwarding ports. monica is the launcher, supervisor,
 and one-way mirror in one.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
+  <img alt="monica — six agent-driven browser sessions tiled in a grid" src="docs/screenshot-light.png" width="900">
+</picture>
+
 ## Quick start
 
 Requires [Node](https://nodejs.org/). Use whichever package manager you like —
