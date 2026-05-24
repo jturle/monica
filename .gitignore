@@ -11,6 +11,9 @@ out/
 !.yarn/versions
 .pnp.*
 
+# local MCP config — machine-specific paths / CDP target
+.mcp.json
+
 # stray local file, not part of the project
 wow.pdf
 *.pdf
