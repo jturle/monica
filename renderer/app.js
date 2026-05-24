@@ -22,7 +22,6 @@ const stage = document.getElementById("stage");
 const omnibox = document.getElementById("omnibox");
 const tabsBar = document.getElementById("tabs");
 const backdrop = document.getElementById("backdrop");
-const backdropGo = document.getElementById("backdrop-go");
 const viewToggle = document.getElementById("view-toggle");
 
 const GUTTER = 6; // gap between grid cells
@@ -32,7 +31,6 @@ const isBlank = (u) => !u || u === BLANK;
 const dlog = (scope, msg) => window.api?.log?.(scope, msg); // -> monica-debug.log
 
 let paneSeq = 0; // pane ids (also the "leafId" the proxy uses)
-let userSeq = 0; // friendly numbering for ⌘T panes
 let panes = []; // [{ id, name, kind:"user"|"conn", url, session, connectionId }]
 let selectedId = null;
 let viewMode = "tabs";
@@ -53,6 +51,11 @@ function sessionPaneName(session) {
   const c = (sessionCounts.get(session) || 0) + 1;
   sessionCounts.set(session, c);
   return c === 1 ? session : session + " " + c;
+}
+// Auto-label for a user tab: the page hostname (www. stripped), or "New Tab" blank.
+function hostLabel(u) {
+  if (isBlank(u)) return "New Tab";
+  try { return new URL(u).hostname.replace(/^www\./, "") || "New Tab"; } catch { return "New Tab"; }
 }
 
 // ---- url normalization -----------------------------------------------------
@@ -97,7 +100,14 @@ function createPaneEl(p) {
     chrome.querySelector(".pname").textContent = p.name;
     chrome.querySelector(".ptitle").textContent = e.title || (isBlank(p.url) ? "new tab" : p.url);
   });
-  const setUrl = (u) => { p.url = u; if (p.id === selectedId) omnibox.value = isBlank(u) ? "" : u; };
+  const setUrl = (u) => {
+    p.url = u;
+    if (p.autoName) {
+      const label = hostLabel(u);
+      if (label !== p.name) { p.name = label; chrome.querySelector(".pname").textContent = label; renderTabs(); }
+    }
+    if (p.id === selectedId) omnibox.value = isBlank(u) ? "" : u;
+  };
   wv.addEventListener("did-navigate", (e) => setUrl(e.url));
   wv.addEventListener("did-navigate-in-page", (e) => setUrl(e.url));
 
@@ -106,8 +116,9 @@ function createPaneEl(p) {
   return el;
 }
 
-function makePane({ name, url = BLANK, kind = "user", session = null, connectionId = null }) {
-  const p = { id: ++paneSeq, name, kind, url, session, connectionId };
+function makePane({ name, url = BLANK, kind = "user", session = null, connectionId = null, autoName = false }) {
+  // autoName: keep the label in sync with the page hostname until the user renames it.
+  const p = { id: ++paneSeq, name, kind, url, session, connectionId, autoName };
   panes.push(p);
   createPaneEl(p);
   return p;
@@ -153,10 +164,8 @@ function positionPanes() {
     el.style.display = "";
     const r = Math.floor(i / cols);
     const c = i % cols;
-    const itemsInRow = r === rows - 1 ? n - cols * (rows - 1) : cols;
-    const rowPad = ((cols - itemsInRow) * (cellW + GUTTER)) / 2; // centre a short last row
     setRect(el, {
-      x: OUTER + rowPad + c * (cellW + GUTTER),
+      x: OUTER + c * (cellW + GUTTER), // keep column positions; a short last row stays left-aligned
       y: OUTER + r * (cellH + GUTTER),
       w: cellW,
       h: cellH,
@@ -195,7 +204,7 @@ function syncOmnibox() {
 // ---- pane operations -------------------------------------------------------
 
 function newUserPane(url = BLANK) {
-  const p = makePane({ name: "tab-" + ++userSeq, url, kind: "user" });
+  const p = makePane({ name: hostLabel(url), url, kind: "user", autoName: true });
   selectedId = p.id;
   layout();
   select(p.id);
@@ -279,7 +288,7 @@ function beginRename(p, pill, nameEl) {
   input.select();
   const commit = () => {
     const v = input.value.trim();
-    if (v) p.name = v;
+    if (v) { p.name = v; p.autoName = false; } // explicit rename wins; stop tracking the host
     const el = paneEls.get(p.id);
     if (el) el.querySelector(".pname").textContent = p.name;
     renderTabs();
@@ -293,11 +302,15 @@ function beginRename(p, pill, nameEl) {
 
 // ---- view mode -------------------------------------------------------------
 
-function setView(mode) {
+function applyView(mode) {
   viewMode = mode === "grid" ? "grid" : "tabs";
   stage.dataset.view = viewMode;
   viewToggle?.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.view === viewMode));
   layout();
+}
+function setView(mode) { // user action: apply + persist (alongside cdpMode in monica-settings.json)
+  applyView(mode);
+  window.api?.setViewPref?.(viewMode);
 }
 function toggleView() {
   setView(viewMode === "grid" ? "tabs" : "grid");
@@ -313,14 +326,6 @@ omnibox.addEventListener("keydown", (e) => {
   if (!p) { newUserPane(u); return; } // no panes → open one navigated to the entry
   const wv = paneEls.get(p.id)?.querySelector("webview");
   if (wv) wv.src = u;
-});
-
-backdropGo.addEventListener("keydown", (e) => {
-  if (e.key !== "Enter") return;
-  const u = normalizeUrl(backdropGo.value);
-  if (!u) return;
-  newUserPane(u);
-  backdropGo.value = "";
 });
 
 // ---- proxy-driven panes (external CDP clients) -----------------------------
@@ -386,9 +391,25 @@ let cdpLabel = "CDP :9222";
 let cdpEndpoint = "http://127.0.0.1:9222";
 let copyTimer = null;
 
-// Copy-paste prompts shown on the welcome backdrop. __ENDPOINT__ is filled with
+// Copy-paste content shown on the welcome backdrop. __ENDPOINT__ is filled with
 // the live CDP endpoint so they're correct in Local or LAN mode.
 const PROMPTS = {
+  mcpConfig:
+    "{\n" +
+    '  "mcpServers": {\n' +
+    '    "agent-browser": {\n' +
+    '      "command": "npx",\n' +
+    '      "args": ["-y", "github:jturle/agent-browser-mcp"],\n' +
+    '      "env": { "AGENT_BROWSER_CDP": "__ENDPOINT__" }\n' +
+    "    }\n" +
+    "  }\n" +
+    "}",
+  agentBrowser:
+    "Use agent-browser for browser work in this task. It's connected to a browser I\n" +
+    "can watch and take over. Try to complete everything yourself; only if you hit\n" +
+    "something a human must clear — a captcha, sign-in, or 2FA — pause and ask me to\n" +
+    "step in rather than working around it. Use a separate agent-browser session per\n" +
+    "task, and close that session when you're done.",
   puppeteer:
     "Use the monica browser cockpit for browser work in this task. Connect with\n" +
     "puppeteer-core to the existing CDP endpoint — do not launch your own browser:\n\n" +
@@ -396,18 +417,8 @@ const PROMPTS = {
     "  const browser = await puppeteer.connect({ browserURL: '__ENDPOINT__', defaultViewport: null });\n" +
     "  const page = await browser.newPage();   // opens a pane in monica\n" +
     "  // ...do the task...\n" +
-    "  await browser.disconnect();             // use disconnect(), never close()\n\n" +
+    "  await browser.disconnect();             // disconnect() detaches; the pane stays\n\n" +
     "To reuse an open page: browser.targets(), filter t.type()==='webview', await target.page().",
-  agentBrowser:
-    "Use agent-browser for browser work, but attach it to monica's existing CDP\n" +
-    "endpoint instead of launching a separate browser — connect it to __ENDPOINT__\n" +
-    "(Chrome DevTools Protocol over HTTP). Pages open as panes in monica that I can\n" +
-    "watch and take over. When finished, detach — don't close the browser.",
-  generic:
-    "For any browser task, attach to the running Chromium at __ENDPOINT__ (a Chrome\n" +
-    "DevTools Protocol endpoint) — do not spawn your own browser. This is \"monica\":\n" +
-    "pages you open show up as live panes I can see and drive. Create pages with\n" +
-    "newPage(); to drive an existing pane, attach to a target of type \"webview\".",
 };
 const promptText = (key) => (PROMPTS[key] || "").replace(/__ENDPOINT__/g, cdpEndpoint);
 
@@ -479,8 +490,9 @@ window.api?.onNewTab(() => addPane());
 window.api?.onCloseTab(() => { if (selectedId != null) closePane(selectedId); });
 window.addEventListener("resize", () => positionPanes());
 
-setView("tabs");
+applyView("grid"); // default until the stored pref loads (avoids persisting before we read it)
 renderTabs();
 layout(); // no panes yet → shows the backdrop
 renderWelcome();
 initCdpToggle();
+window.api?.getViewPref?.().then((v) => { if (v) applyView(v); }); // restore last view

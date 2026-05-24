@@ -42,8 +42,7 @@ body { display: flex; flex-direction: column; }
 .topbar-row.controls { padding-left: 84px; } /* leave room for macOS traffic lights */
 .topbar-row.tabs-row {
   height: 36px;
-  align-items: flex-end;
-  padding-bottom: 6px;
+  align-items: center;
   border-top: 1px solid var(--line);
 }
 /* collapse the tab strip entirely when there are no panes (welcome screen) */
@@ -119,15 +118,18 @@ body { display: flex; flex-direction: column; }
 
 .cdp-group { display: flex; align-items: center; gap: 6px; -webkit-app-region: no-drag; }
 #topbar .cdp {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
   font-size: 11px;
   color: var(--accent);
   border: 1px solid var(--accent-dim);
-  border-radius: 6px;
-  padding: 3px 8px;
+  border-radius: 7px;
+  padding: 0 10px;
   white-space: nowrap;
   cursor: pointer;
   min-width: 84px;
-  text-align: center;
 }
 #topbar .cdp:hover { background: #0e2925; }
 #topbar .cdp.lan:hover { background: #38300f; }
@@ -138,17 +140,20 @@ body { display: flex; flex-direction: column; }
 }
 .cdp-toggle {
   display: flex;
+  height: 28px;
   border: 1px solid var(--line-2);
-  border-radius: 6px;
+  border-radius: 7px;
   overflow: hidden;
 }
 .cdp-toggle button {
+  display: flex;
+  align-items: center;
   border: none;
   background: #0d1018;
   color: var(--muted);
   font: inherit;
   font-size: 11px;
-  padding: 3px 8px;
+  padding: 0 10px;
   cursor: pointer;
 }
 .cdp-toggle button + button { border-left: 1px solid var(--line-2); }
@@ -157,18 +162,21 @@ body { display: flex; flex-direction: column; }
 
 .view-toggle {
   display: flex;
+  height: 28px;
   border: 1px solid var(--line-2);
-  border-radius: 6px;
+  border-radius: 7px;
   overflow: hidden;
   -webkit-app-region: no-drag;
 }
 .view-toggle button {
+  display: flex;
+  align-items: center;
   border: none;
   background: #0d1018;
   color: var(--muted);
   font: inherit;
   font-size: 11px;
-  padding: 3px 10px;
+  padding: 0 10px;
   cursor: pointer;
 }
 .view-toggle button + button { border-left: 1px solid var(--line-2); }
@@ -188,28 +196,13 @@ body { display: flex; flex-direction: column; }
 #backdrop.hidden { display: none; }
 #backdrop .welcome { max-width: 660px; margin: 0 auto; padding: 8vh 28px 64px; }
 #backdrop .bd-mark { font-size: 40px; font-weight: 700; letter-spacing: 1px; color: var(--accent); text-align: center; }
-#backdrop .bd-tag { text-align: center; color: var(--muted); margin: 6px 0 28px; }
-#backdrop #backdrop-go {
-  display: block;
-  width: 100%;
-  height: 46px;
-  padding: 0 16px;
-  background: #0d1018;
-  border: 1px solid var(--line-2);
-  border-radius: 10px;
-  color: var(--text);
-  font-size: 15px;
-  outline: none;
-  text-align: center;
-}
-#backdrop #backdrop-go:focus { border-color: var(--accent); }
-#backdrop #backdrop-go::placeholder { color: var(--muted); }
-#backdrop .bd-hint { text-align: center; margin-top: 12px; color: var(--muted); font-size: 11px; }
-#backdrop .bd-hint kbd { background: #0d1018; border: 1px solid var(--line-2); border-radius: 4px; padding: 1px 5px; }
+#backdrop .bd-tag { text-align: center; color: var(--muted); margin: 6px 0 24px; }
 
 #backdrop .howto { margin-top: 40px; border-top: 1px solid var(--line); padding-top: 26px; }
 #backdrop .howto h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin: 0 0 12px; }
-#backdrop .howto p { line-height: 1.6; margin: 0 0 22px; }
+#backdrop .howto h3 { font-size: 13px; color: var(--text); margin: 28px 0 8px; }
+#backdrop .howto p { line-height: 1.6; margin: 0 0 16px; }
+#backdrop .howto p.cap { margin: -8px 0 18px; font-size: 11px; color: var(--muted); }
 #backdrop .howto code { background: #0d1018; border: 1px solid var(--line-2); border-radius: 5px; padding: 1px 6px; color: var(--accent); }
 #backdrop .lnk { background: none; border: none; color: var(--accent); cursor: pointer; font: inherit; font-size: 12px; padding: 0 2px; }
 #backdrop .lnk:hover { text-decoration: underline; }

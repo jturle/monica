@@ -12,8 +12,8 @@
         <div class="brand">monica</div>
         <input id="omnibox" placeholder="Enter URL and press Enter…" spellcheck="false" />
         <div class="seg view-toggle" id="view-toggle" title="Switch layout (⌘G)">
-          <button data-view="tabs" class="active">Tabs</button>
-          <button data-view="grid">Grid</button>
+          <button data-view="grid" class="active">Grid</button>
+          <button data-view="tabs">Tabs</button>
         </div>
         <div class="cdp-group">
           <span class="cdp" id="cdp-badge" title="Chrome DevTools Protocol endpoint">CDP :9222</span>
@@ -34,33 +34,40 @@
           <div class="bd-mark">monica</div>
           <div class="bd-tag">a cockpit for browsers your agents drive — watch them live, take over anytime</div>
 
-          <input id="backdrop-go" placeholder="Enter a URL or search…" spellcheck="false" />
-          <div class="bd-hint">
-            <kbd>⌘T</kbd> new tab · <kbd>⌘G</kbd> grid / tabs ·
-            <kbd>⌘←</kbd>/<kbd>⌘→</kbd> back/forward · <kbd>⌘W</kbd> close
-          </div>
-
           <section class="howto">
             <h2>Connect an agent</h2>
             <p>
               monica exposes a Chrome DevTools Protocol endpoint at
               <code id="ep-inline">http://127.0.0.1:9222</code>
               <button class="lnk" data-copy="endpoint">copy</button>.
-              Point any CDP client at it — pages it opens become panes you can watch and drive.
-              Use the <b>Local / LAN</b> toggle (top-right) to reach it from another machine.
+              Pages your agent opens become panes here — watch them live and take over
+              anytime. Use the <b>Local / LAN</b> toggle (top-right) to reach it from
+              another machine.
             </p>
 
+            <h3>Recommended — agent-browser-mcp</h3>
+            <p>
+              The <code>jturle</code> fork of
+              <code>agent-browser-mcp</code> drives monica over CDP and tags each agent
+              session, so every session gets its own pane(s) and closing a session clears
+              them. Add it to your MCP client (e.g. Claude Code's <code>.mcp.json</code>):
+            </p>
+            <div class="prompt-card">
+              <div class="prompt-head"><span>.mcp.json — agent-browser-mcp (jturle fork)</span><button class="lnk copy-prompt" data-prompt="mcpConfig">Copy</button></div>
+              <pre class="prompt" data-prompt-text="mcpConfig"></pre>
+            </div>
+            <p class="cap"><code>AGENT_BROWSER_CDP</code> follows the Local / LAN toggle above — copy it as-is.</p>
+            <p>Then point your agent at it:</p>
+            <div class="prompt-card">
+              <div class="prompt-head"><span>Paste into your agent</span><button class="lnk copy-prompt" data-prompt="agentBrowser">Copy</button></div>
+              <pre class="prompt" data-prompt-text="agentBrowser"></pre>
+            </div>
+
+            <h3>Alternative — Puppeteer / raw CDP</h3>
+            <p>Any CDP client works. Connect without launching a browser:</p>
             <div class="prompt-card">
               <div class="prompt-head"><span>Paste into your agent — Puppeteer</span><button class="lnk copy-prompt" data-prompt="puppeteer">Copy</button></div>
               <pre class="prompt" data-prompt-text="puppeteer"></pre>
-            </div>
-            <div class="prompt-card">
-              <div class="prompt-head"><span>Paste into your agent — agent-browser</span><button class="lnk copy-prompt" data-prompt="agentBrowser">Copy</button></div>
-              <pre class="prompt" data-prompt-text="agentBrowser"></pre>
-            </div>
-            <div class="prompt-card">
-              <div class="prompt-head"><span>Paste into your agent — any CDP / MCP tool</span><button class="lnk copy-prompt" data-prompt="generic">Copy</button></div>
-              <pre class="prompt" data-prompt-text="generic"></pre>
             </div>
           </section>
         </div>
@@ -68,8 +75,8 @@
     </main>
 
     <footer id="hint">
-      <kbd>⌘T</kbd> new tab · double-click a tab to rename ·
-      <kbd>⌘G</kbd> toggle grid / tabs · <kbd>⌘←</kbd>/<kbd>⌘→</kbd> back / forward ·
+      <kbd>⌘T</kbd> new tab · <kbd>⌘G</kbd> toggle grid / tabs ·
+      <kbd>⌘←</kbd>/<kbd>⌘→</kbd> back / forward ·
       <kbd>⌘R</kbd> reload pane · <kbd>⌘W</kbd> close pane
     </footer>
 
