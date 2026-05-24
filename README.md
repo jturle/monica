@@ -1,11 +1,13 @@
 # monica
 
 **Keep tabs on your agents' browsing — and assist when required.** Point them
-at monica (the [agent-browser](https://github.com/jturle/agent-browser-mcp) MCP,
-Puppeteer, Playwright — anything that talks CDP) and every session becomes a live
-pane, tiled like a security-camera wall or flipped to tabs. Watch the fleet in real
-time, and grab the wheel whenever one needs a human: a captcha, a login, or a quiet
-word about its life choices.
+at monica ([agent-browser](https://github.com/vercel-labs/agent-browser) or
+[agent-browser-mcp](https://github.com/jturle/agent-browser-mcp),
+[Puppeteer](https://pptr.dev), [Playwright](https://playwright.dev) — anything that
+talks [CDP](https://chromedevtools.github.io/devtools-protocol/)) and every session
+becomes a live pane, tiled like a security-camera wall or flipped to tabs. Watch the
+fleet in real time, and grab the wheel whenever one needs a human: a captcha, a
+login, or a quiet word about its life choices.
 
 Every pane is a real, attachable CDP target, so a remote `puppeteer.connect(...)` +
 `browser.newPage()` just works — no spawning headless Chrome from a shell, juggling
@@ -76,9 +78,10 @@ in LAN mode — the badge shows the current address).
 ### agent-browser-mcp (recommended)
 
 The [jturle fork of agent-browser-mcp](https://github.com/jturle/agent-browser-mcp)
-drives monica over CDP and tags each agent session, so every session gets its own
-pane(s) and closing a session clears them. Add it to your MCP client (e.g. Claude
-Code's `.mcp.json`):
+(an [MCP](https://modelcontextprotocol.io/) server wrapping the
+[agent-browser](https://github.com/vercel-labs/agent-browser) CLI) drives monica over
+CDP and tags each agent session, so every session gets its own pane(s) and closing a
+session clears them. Add it to your MCP client (e.g. Claude Code's `.mcp.json`):
 
 ```json
 {
@@ -138,7 +141,7 @@ Good to know:
 
 ## Architecture
 
-- **Shell:** Electron. Panes are `<webview>` elements positioned absolutely in the
+- **Shell:** [Electron](https://www.electronjs.org/). Panes are `<webview>` elements positioned absolutely in the
   DOM, so grid/tabs layout, selection, and z-order are plain CSS/HTML; a webview is
   never reparented when the layout changes.
 - **CDP proxy:** real Chromium DevTools runs internal-only on `127.0.0.1:9223`;
