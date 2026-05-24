@@ -1,10 +1,11 @@
 :root {
-  --bg: #0b0e14;
-  --panel: #11151f;
-  --line: #1e2532;
-  --line-2: #2a3445;
-  --text: #c7d0df;
-  --muted: #6b7689;
+  --bg: #1c2128;
+  --panel: #242b35;
+  --line: #323a45;
+  --line-2: #404a57;
+  --text: #cdd6e1;
+  --muted: #8b95a4;
+  --well: #161b22; /* recessed control / input surface */
   --accent: #38e1c4;
   --accent-dim: #1d6b60;
   --gutter: 6px;
@@ -68,7 +69,7 @@ body { display: flex; flex-direction: column; }
   gap: 6px;
   padding: 4px 6px 4px 12px;
   border-radius: 7px;
-  background: #0d1018;
+  background: var(--well);
   border: 1px solid var(--line-2);
   color: var(--muted);
   font-size: 12px;
@@ -92,7 +93,7 @@ body { display: flex; flex-direction: column; }
 .tabs .tab .tclose:hover { color: #ff6b6b; }
 .tabs .tab .tedit {
   width: 120px;
-  background: #05070b;
+  background: var(--well);
   border: 1px solid var(--accent-dim);
   border-radius: 4px;
   color: var(--text);
@@ -107,7 +108,7 @@ body { display: flex; flex-direction: column; }
   height: 28px;
   padding: 0 12px;
   border-radius: 7px;
-  background: #0d1018;
+  background: var(--well);
   border: 1px solid var(--line-2);
   color: var(--text);
   font-size: 12px;
@@ -149,7 +150,7 @@ body { display: flex; flex-direction: column; }
   display: flex;
   align-items: center;
   border: none;
-  background: #0d1018;
+  background: var(--well);
   color: var(--muted);
   font: inherit;
   font-size: 11px;
@@ -172,7 +173,7 @@ body { display: flex; flex-direction: column; }
   display: flex;
   align-items: center;
   border: none;
-  background: #0d1018;
+  background: var(--well);
   color: var(--muted);
   font: inherit;
   font-size: 11px;
@@ -203,10 +204,10 @@ body { display: flex; flex-direction: column; }
 #backdrop .howto h3 { font-size: 13px; color: var(--text); margin: 28px 0 8px; }
 #backdrop .howto p { line-height: 1.6; margin: 0 0 16px; }
 #backdrop .howto p.cap { margin: -8px 0 18px; font-size: 11px; color: var(--muted); }
-#backdrop .howto code { background: #0d1018; border: 1px solid var(--line-2); border-radius: 5px; padding: 1px 6px; color: var(--accent); }
+#backdrop .howto code { background: var(--well); border: 1px solid var(--line-2); border-radius: 5px; padding: 1px 6px; color: var(--accent); }
 #backdrop .lnk { background: none; border: none; color: var(--accent); cursor: pointer; font: inherit; font-size: 12px; padding: 0 2px; }
 #backdrop .lnk:hover { text-decoration: underline; }
-#backdrop .prompt-card { border: 1px solid var(--line-2); border-radius: 10px; overflow: hidden; margin-bottom: 14px; background: #0d1018; }
+#backdrop .prompt-card { border: 1px solid var(--line-2); border-radius: 10px; overflow: hidden; margin-bottom: 14px; background: var(--well); }
 #backdrop .prompt-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: var(--panel); border-bottom: 1px solid var(--line); font-size: 12px; color: var(--muted); }
 #backdrop pre.prompt { margin: 0; padding: 12px; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); white-space: pre-wrap; word-break: break-word; }
 
@@ -214,7 +215,7 @@ body { display: flex; flex-direction: column; }
   position: absolute;
   display: flex;
   flex-direction: column;
-  background: #000;
+  background: var(--bg);
   border-radius: 8px;
   overflow: hidden;
   box-shadow: 0 0 0 1px var(--line-2) inset;
@@ -266,7 +267,7 @@ body { display: flex; flex-direction: column; }
   font-size: 11px;
 }
 #hint kbd {
-  background: #0d1018;
+  background: var(--well);
   border: 1px solid var(--line-2);
   border-radius: 4px;
   padding: 1px 5px;

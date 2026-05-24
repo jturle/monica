@@ -28,6 +28,19 @@ const GUTTER = 6; // gap between grid cells
 const OUTER = 8; // grid margin to the stage edge
 const BLANK = "about:blank";
 const isBlank = (u) => !u || u === BLANK;
+// A calm, theme-matched placeholder shown for blank panes so opening a tab doesn't
+// flash stark white. The pane's *logical* url stays BLANK (see setUrl), so the
+// omnibox and labels still treat it as empty; this is only what the webview renders.
+const NEWTAB =
+  "data:text/html;charset=utf-8," +
+  encodeURIComponent(
+    '<!doctype html><meta charset="utf-8"><style>' +
+      "html,body{height:100%;margin:0}" +
+      "body{display:flex;align-items:center;justify-content:center;background:#1c2128;" +
+      "color:#566072;font:13px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;letter-spacing:.4px}" +
+      "</style><body>new tab</body>"
+  );
+const isNewTabUrl = (u) => !!u && u.startsWith("data:text/html");
 const dlog = (scope, msg) => window.api?.log?.(scope, msg); // -> monica-debug.log
 
 let paneSeq = 0; // pane ids (also the "leafId" the proxy uses)
@@ -86,7 +99,7 @@ function createPaneEl(p) {
   const wv = document.createElement("webview");
   wv.setAttribute("partition", "persist:pane-" + p.id); // stable isolation, independent of name
   wv.setAttribute("allowpopups", "");
-  wv.setAttribute("src", p.url);
+  wv.setAttribute("src", isBlank(p.url) ? NEWTAB : p.url);
 
   el.appendChild(chrome);
   el.appendChild(wv);
@@ -101,6 +114,7 @@ function createPaneEl(p) {
     chrome.querySelector(".ptitle").textContent = e.title || (isBlank(p.url) ? "new tab" : p.url);
   });
   const setUrl = (u) => {
+    if (isNewTabUrl(u)) return; // the placeholder loaded; keep the pane logically blank
     p.url = u;
     if (p.autoName) {
       const label = hostLabel(u);
