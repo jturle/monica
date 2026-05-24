@@ -1,13 +1,17 @@
 {
   "name": "monica",
+  "productName": "monica",
   "version": "0.1.0",
   "private": true,
-  "description": "Embedded multi-browser cockpit — tiling panes, each a CDP-attachable target",
+  "description": "Keep tabs on the browsers your AI agents drive — watch every session live and take over any tab.",
+  "author": "James Turle",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "package": "electron-packager . monica --platform=darwin --arch=arm64 --icon=build/icon --app-bundle-id=com.turle.monica --out=dist --overwrite"
   },
   "devDependencies": {
+    "@electron/packager": "^20.0.0",
     "electron": "^42.2.0"
   },
   "dependencies": {

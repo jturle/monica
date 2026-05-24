@@ -1,8 +1,15 @@
-const { app, BrowserWindow, Menu, ipcMain, dialog, clipboard } = require("electron");
+const { app, BrowserWindow, Menu, ipcMain, dialog, clipboard, nativeTheme } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
 const proxy = require("./proxy");
+
+// Brand the app as "monica" (not "Electron"). Must run before any getPath() call so
+// userData/storage land under …/monica. In dev the macOS *menu-bar title* still reads
+// "Electron" (it comes from the prebuilt Electron.app bundle, read before JS runs) —
+// `yarn package` produces a fully-branded monica.app for that.
+app.setName("monica");
+const ICON_PNG = path.join(__dirname, "build", "icon.png");
 
 const PUBLIC_PORT = proxy.PUBLIC_PORT; // 9222 — what clients/tunnels connect to
 const SETTINGS_FILE = path.join(app.getPath("userData"), "monica-settings.json");
@@ -48,10 +55,13 @@ app.commandLine.appendSwitch("remote-allow-origins", "*");
 let mainWindow = null;
 
 function createWindow() {
+  // Match the pre-paint window background to the resolved theme so launch isn't a flash.
+  const dark = settings.theme === "dark" || (settings.theme !== "light" && nativeTheme.shouldUseDarkColors);
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 920,
-    backgroundColor: "#0b0e14",
+    backgroundColor: dark ? "#1a2030" : "#c1cedb",
+    icon: ICON_PNG,
     titleBarStyle: "hiddenInset",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -193,6 +203,17 @@ function buildMenu() {
 }
 
 app.whenReady().then(async () => {
+  // Dock icon + About panel branding (works in dev; the menu-bar title needs a packaged app).
+  if (process.platform === "darwin" && app.dock) {
+    try { app.dock.setIcon(ICON_PNG); } catch {}
+  }
+  app.setAboutPanelOptions({
+    applicationName: "monica",
+    applicationVersion: app.getVersion(),
+    credits: "A cockpit for the browsers your agents drive.",
+    copyright: "© 2026 James Turle",
+    iconPath: ICON_PNG,
+  });
   buildMenu();
   createWindow();
   try {
