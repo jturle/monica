@@ -1,11 +1,11 @@
 # monica
 
-**Mission control for your agents.** Point them at monica — the
-[agent-browser](https://github.com/jturle/agent-browser-mcp) MCP, Puppeteer,
-Playwright, anything that talks CDP — and every agent session becomes a live pane you
-can watch, tiled like a security-camera wall (or flipped to tabs). Keep an eye on the
-whole fleet in real time, and grab the wheel of any one the moment it needs a human —
-a captcha, a login, or a quiet word about its life choices.
+**Keep tabs on your agents' browsing — and assist when required.** Point them
+at monica (the [agent-browser](https://github.com/jturle/agent-browser-mcp) MCP,
+Puppeteer, Playwright — anything that talks CDP) and every session becomes a live
+pane, tiled like a security-camera wall or flipped to tabs. Watch the fleet in real
+time, and grab the wheel whenever one needs a human: a captcha, a login, or a quiet
+word about its life choices.
 
 Every pane is a real, attachable CDP target, so a remote `puppeteer.connect(...)` +
 `browser.newPage()` just works — no spawning headless Chrome from a shell, juggling
