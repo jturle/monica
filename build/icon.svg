@@ -1,9 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <rect x="96" y="96" width="832" height="832" rx="185" fill="#C1CEDB"/>
-  <!-- blocky constructed M (echoes the ledric L), ink on paper -->
-  <path d="M300 712 V322 L512 600 L724 322 V712"
-        fill="none" stroke="#283141" stroke-width="76"
+  <!-- transparent background: just the blocky constructed M (echoes the ledric L) -->
+  <path d="M232 760 V300 L512 660 L792 300 V760"
+        fill="none" stroke="#283141" stroke-width="92"
         stroke-linejoin="miter" stroke-linecap="butt" stroke-miterlimit="14"/>
   <!-- detached square accent, the ledric signature -->
-  <rect x="788" y="300" width="64" height="64" fill="#283141"/>
+  <rect x="844" y="276" width="76" height="76" fill="#283141"/>
 </svg>
