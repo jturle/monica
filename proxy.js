@@ -201,10 +201,24 @@ function onConnection(client, req) {
   client.on("close", () => {
     try { backend.close(); } catch {}
     logFn("conn", "ws close", ctx.connectionId != null ? "#" + ctx.connectionId : path);
-    // Retain panes on disconnect (CDP semantics: disconnect = detach, not close).
-    // Keep the targetToPane mappings so panes stay closable-by-target if a client
-    // reconnects and attaches to them.
-    if (ctx.connectionId != null) hooks.onConnectionClose?.(ctx.connectionId);
+    if (ctx.connectionId == null) return;
+    // A NAMED ?session= owns its panes for the life of its connection. agent-browser
+    // keeps one connection per session and only drops it on `close` (session end), so
+    // a disconnect means "discard this session" — close its panes. This is the
+    // last-mile the agent-browser CDP `close` can't do itself (it only detaches, and
+    // its binary won't close a session's final tab over CDP).
+    //
+    // An ANONYMOUS connection (e.g. puppeteer.disconnect()) is a mere detach: retain
+    // its panes, matching real Chrome, so a human can take over after the agent leaves.
+    if (ctx.named) {
+      for (const [tid, e] of targetToPane) {
+        if (e.connectionId !== ctx.connectionId) continue;
+        targetToPane.delete(tid);
+        logFn("proxy", "session end #" + ctx.connectionId, "-> close pane leaf=" + e.leafId);
+        hooks.closePane?.(e.leafId);
+      }
+    }
+    hooks.onConnectionClose?.(ctx.connectionId);
   });
   client.on("error", () => { try { backend.close(); } catch {} });
 
@@ -224,9 +238,13 @@ function openConnection(ctx, fullUrl, req) {
   if (qi >= 0) {
     try { session = new URLSearchParams(fullUrl.slice(qi + 1)).get("session"); } catch {}
   }
-  // Scope key isolates targets: a stable ?session= for named/resumable sessions,
-  // else a per-connection key. Independent of the (async-refined) display name.
+  // Scope key isolates targets: a stable ?session= for named sessions, else a
+  // per-connection key. Independent of the (async-refined) display name.
   ctx.scopeKey = session || "conn-" + ctx.connectionId;
+  // A named ?session= owns its panes: when its connection drops we treat that as
+  // the session ending and discard them (see the close handler). An anonymous
+  // connection is a mere detach and its panes are retained.
+  ctx.named = !!session;
   const baseHost = !ip || ip === "127.0.0.1" || ip === "::1" ? "localhost" : ip;
   const n = (hostCounters.get(baseHost) || 0) + 1;
   hostCounters.set(baseHost, n);
