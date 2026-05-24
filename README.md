@@ -1,15 +1,17 @@
 # monica
 
-An embedded multi-browser cockpit. Open many browsers inside one desktop app,
-view them as a grid like a security-camera wall (or flip to tabs), and drive any
-one by hand — and, because every pane is a live **Chrome DevTools Protocol (CDP)
-target**, point your agent at it (the [agent-browser](https://github.com/jturle/agent-browser-mcp)
-MCP, Puppeteer, Playwright, any CDP/MCP tool) and watch it work in real time,
-stepping in whenever you want.
+A **cockpit for the browsers your agents drive.** Point an agent at monica over the
+**Chrome DevTools Protocol** — the [agent-browser](https://github.com/jturle/agent-browser-mcp)
+MCP, Puppeteer, Playwright, anything that speaks CDP — and every page it opens shows
+up as a live pane in one desktop app, tiled like a security-camera wall (or flipped
+to tabs). Keep an eye on your agent overlords in real time, and grab the wheel of any
+tab the moment one needs a human — a captcha, a login, or a quiet word about its
+life choices.
 
-No launching headless Chrome from a shell, juggling `--remote-debugging-port`,
-or forwarding ports. monica is the launcher, supervisor, and viewer in one — a
-remote `puppeteer.connect(...)` + `browser.newPage()` "just works" against it.
+Every pane is a real, attachable CDP target, so a remote `puppeteer.connect(...)` +
+`browser.newPage()` just works — no spawning headless Chrome from a shell, juggling
+`--remote-debugging-port`, or forwarding ports. monica is the launcher, supervisor,
+and one-way mirror in one.
 
 ## Quick start
 
