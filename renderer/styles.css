@@ -1,14 +1,50 @@
+/* Two brand themes pulled from getledric.com / turle.com (paper & ink).
+   Toggle sets data-theme on <html>; the choice persists in monica-settings.json. */
 :root {
-  --bg: #1c2128;
-  --panel: #242b35;
-  --line: #323a45;
-  --line-2: #404a57;
-  --text: #cdd6e1;
-  --muted: #8b95a4;
-  --well: #161b22; /* recessed control / input surface */
-  --accent: #38e1c4;
-  --accent-dim: #1d6b60;
   --gutter: 6px;
+  --danger: #e5534b; /* destructive hover (close buttons) */
+}
+
+/* Dark — the brand navy/blue as a cockpit */
+:root[data-theme="dark"] {
+  --bg: #1a2030;        /* ink */
+  --panel: #283141;     /* ink-stamp */
+  --line: #3a4256;
+  --line-2: #49546b;
+  --text: #c1cedb;      /* paper */
+  --muted: #8593a8;
+  --well: #161c27;      /* recessed control / input surface */
+  --accent: #9fc5d9;    /* sky tint — pops on navy */
+  --accent-dim: #3c5d70;/* active-pill background */
+  --accent-fg: #eaf3f8; /* text on accent-dim */
+  --accent-soft: #1e3540;/* subtle hover wash */
+  --warn: #ffcf5c;      /* LAN amber */
+  --warn-line: #7a5e1e;
+  --warn-bg: #2a210a;
+  --warn-fg: #fff6df;
+  --warn-soft: #38300f;
+  --pane-elev: 0 0 0 transparent;
+}
+
+/* Light — paper & ink, matching the sites exactly */
+:root[data-theme="light"] {
+  --bg: #c1cedb;        /* paper */
+  --panel: #ffffff;     /* white page frame */
+  --line: rgba(26, 32, 48, 0.14);
+  --line-2: rgba(26, 32, 48, 0.24);
+  --text: #1a2030;      /* ink */
+  --muted: rgba(26, 32, 48, 0.55);
+  --well: #e6edf3;      /* faint input tint on white */
+  --accent: #1a2030;    /* ink — strong emphasis (selection, brand) */
+  --accent-dim: #9fc5d9;/* sky — active-pill background, focus rings */
+  --accent-fg: #1a2030; /* ink text on the sky pill */
+  --accent-soft: #eaf1f6;
+  --warn: #8a6d1e;
+  --warn-line: #c9a227;
+  --warn-bg: #fbf3d6;
+  --warn-fg: #4a3b0a;
+  --warn-soft: #f3e7c0;
+  --pane-elev: 0 4px 18px rgba(26, 32, 48, 0.1); /* soft page-frame lift */
 }
 
 * { box-sizing: border-box; }
@@ -90,7 +126,7 @@ body { display: flex; flex-direction: column; }
   opacity: 0;
 }
 .tabs .tab:hover .tclose { opacity: 1; }
-.tabs .tab .tclose:hover { color: #ff6b6b; }
+.tabs .tab .tclose:hover { color: var(--danger); }
 .tabs .tab .tedit {
   width: 120px;
   background: var(--well);
@@ -132,12 +168,12 @@ body { display: flex; flex-direction: column; }
   cursor: pointer;
   min-width: 84px;
 }
-#topbar .cdp:hover { background: #0e2925; }
-#topbar .cdp.lan:hover { background: #38300f; }
+#topbar .cdp:hover { background: var(--accent-soft); }
+#topbar .cdp.lan:hover { background: var(--warn-soft); }
 #topbar .cdp.lan {
-  color: #ffcf5c;
-  border-color: #7a5e1e;
-  background: #2a210a;
+  color: var(--warn);
+  border-color: var(--warn-line);
+  background: var(--warn-bg);
 }
 .cdp-toggle {
   display: flex;
@@ -158,8 +194,8 @@ body { display: flex; flex-direction: column; }
   cursor: pointer;
 }
 .cdp-toggle button + button { border-left: 1px solid var(--line-2); }
-.cdp-toggle button.active { background: var(--accent-dim); color: #eafff9; }
-.cdp-toggle button[data-mode="lan"].active { background: #7a5e1e; color: #fff6df; }
+.cdp-toggle button.active { background: var(--accent-dim); color: var(--accent-fg); }
+.cdp-toggle button[data-mode="lan"].active { background: var(--warn-line); color: var(--warn-fg); }
 
 .view-toggle {
   display: flex;
@@ -181,7 +217,24 @@ body { display: flex; flex-direction: column; }
   cursor: pointer;
 }
 .view-toggle button + button { border-left: 1px solid var(--line-2); }
-.view-toggle button.active { background: var(--accent-dim); color: #eafff9; }
+.view-toggle button.active { background: var(--accent-dim); color: var(--accent-fg); }
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  width: 28px;
+  border: 1px solid var(--line-2);
+  border-radius: 7px;
+  background: var(--well);
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+.icon-btn:hover { color: var(--text); }
 
 /* ---- stage / panes ---- */
 #stage { position: relative; flex: 1; overflow: hidden; }
@@ -218,9 +271,9 @@ body { display: flex; flex-direction: column; }
   background: var(--bg);
   border-radius: 8px;
   overflow: hidden;
-  box-shadow: 0 0 0 1px var(--line-2) inset;
+  box-shadow: 0 0 0 1px var(--line-2) inset, var(--pane-elev);
 }
-.pane.selected { box-shadow: 0 0 0 2px var(--accent) inset; }
+.pane.selected { box-shadow: 0 0 0 2px var(--accent) inset, var(--pane-elev); }
 
 /* tabs mode shows one pane edge-to-edge: no rounding, no selection ring */
 #stage[data-view="tabs"] .pane,
@@ -250,7 +303,7 @@ body { display: flex; flex-direction: column; }
   border: none; background: transparent; color: var(--muted);
   cursor: pointer; font-size: 15px; line-height: 1; padding: 0 4px;
 }
-.pane-chrome .pclose:hover { color: #ff6b6b; }
+.pane-chrome .pclose:hover { color: var(--danger); }
 
 .pane webview { flex: 1; width: 100%; border: 0; background: #fff; }
 

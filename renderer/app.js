@@ -31,15 +31,16 @@ const isBlank = (u) => !u || u === BLANK;
 // A calm, theme-matched placeholder shown for blank panes so opening a tab doesn't
 // flash stark white. The pane's *logical* url stays BLANK (see setUrl), so the
 // omnibox and labels still treat it as empty; this is only what the webview renders.
-const NEWTAB =
-  "data:text/html;charset=utf-8," +
-  encodeURIComponent(
-    '<!doctype html><meta charset="utf-8"><style>' +
-      "html,body{height:100%;margin:0}" +
-      "body{display:flex;align-items:center;justify-content:center;background:#1c2128;" +
-      "color:#566072;font:13px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;letter-spacing:.4px}" +
-      "</style><body>new tab</body>"
-  );
+function newTabUrl() {
+  const dark = document.documentElement.dataset.theme === "dark";
+  const bg = dark ? "#1a2030" : "#ffffff";
+  const fg = dark ? "#566072" : "#9aa3b0";
+  const html =
+    '<!doctype html><meta charset="utf-8"><style>html,body{height:100%;margin:0}' +
+    "body{display:flex;align-items:center;justify-content:center;background:" + bg + ";color:" + fg + ";" +
+    "font:13px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;letter-spacing:.4px}</style><body>new tab</body>";
+  return "data:text/html;charset=utf-8," + encodeURIComponent(html);
+}
 const isNewTabUrl = (u) => !!u && u.startsWith("data:text/html");
 const dlog = (scope, msg) => window.api?.log?.(scope, msg); // -> monica-debug.log
 
@@ -99,7 +100,7 @@ function createPaneEl(p) {
   const wv = document.createElement("webview");
   wv.setAttribute("partition", "persist:pane-" + p.id); // stable isolation, independent of name
   wv.setAttribute("allowpopups", "");
-  wv.setAttribute("src", isBlank(p.url) ? NEWTAB : p.url);
+  wv.setAttribute("src", isBlank(p.url) ? newTabUrl() : p.url);
 
   el.appendChild(chrome);
   el.appendChild(wv);
@@ -330,6 +331,36 @@ function toggleView() {
   setView(viewMode === "grid" ? "tabs" : "grid");
 }
 
+// ---- theme -----------------------------------------------------------------
+// pref is system | light | dark (persisted); "system" follows the OS and tracks
+// live changes. The toggle button flips to an explicit light/dark.
+let themePref = "system";
+const osDark = () => !!window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+const resolvedTheme = () => (themePref === "system" ? (osDark() ? "dark" : "light") : themePref);
+function applyTheme() {
+  const t = resolvedTheme();
+  document.documentElement.dataset.theme = t;
+  const btn = document.getElementById("theme-toggle");
+  if (btn) {
+    btn.textContent = t === "dark" ? "☀" : "☾";
+    btn.title = "Switch to " + (t === "dark" ? "light" : "dark") + " theme";
+  }
+  // recolor any open blank panes so their placeholder matches the new theme
+  for (const p of panes) {
+    if (!isBlank(p.url)) continue;
+    const wv = paneEls.get(p.id)?.querySelector("webview");
+    if (wv) wv.src = newTabUrl();
+  }
+}
+function setTheme(pref) {
+  themePref = pref;
+  applyTheme();
+  window.api?.setThemePref?.(pref);
+}
+function toggleTheme() {
+  setTheme(resolvedTheme() === "dark" ? "light" : "dark");
+}
+
 // ---- omnibox + backdrop entry ----------------------------------------------
 
 omnibox.addEventListener("keydown", (e) => {
@@ -490,6 +521,11 @@ viewToggle?.addEventListener("click", (e) => {
   if (b) setView(b.dataset.view);
 });
 
+document.getElementById("theme-toggle")?.addEventListener("click", toggleTheme);
+window.matchMedia?.("(prefers-color-scheme: dark)")?.addEventListener?.("change", () => {
+  if (themePref === "system") applyTheme(); // follow the OS while no explicit choice is set
+});
+
 // ---- boot ------------------------------------------------------------------
 
 window.api?.onToggleView?.(() => toggleView());
@@ -504,9 +540,11 @@ window.api?.onNewTab(() => addPane());
 window.api?.onCloseTab(() => { if (selectedId != null) closePane(selectedId); });
 window.addEventListener("resize", () => positionPanes());
 
+applyTheme(); // resolve "system" synchronously so there's no flash for OS-default users
 applyView("grid"); // default until the stored pref loads (avoids persisting before we read it)
 renderTabs();
 layout(); // no panes yet → shows the backdrop
 renderWelcome();
 initCdpToggle();
 window.api?.getViewPref?.().then((v) => { if (v) applyView(v); }); // restore last view
+window.api?.getThemePref?.().then((p) => { if (p) { themePref = p; applyTheme(); } }); // restore theme
