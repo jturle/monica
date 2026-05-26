@@ -17,6 +17,19 @@ contextBridge.exposeInMainWorld("api", {
   setViewPref: (mode) => ipcRenderer.send("view:set", mode),
   getThemePref: () => ipcRenderer.invoke("theme:get"),
   setThemePref: (t) => ipcRenderer.send("theme:set", t),
+
+  // Generic settings (the new feature toggles).
+  getSettings: () => ipcRenderer.invoke("settings:get"),
+  patchSettings: (patch) => ipcRenderer.send("settings:patch", patch),
+
+  // Pin / unpin a pane (skip auto-close-stale + close-on-disconnect).
+  setPinned: (leafId, isPinned) => ipcRenderer.send("pane:set-pinned", leafId, !!isPinned),
+
+  // Snapshot a pane to ~/Downloads. Renderer ships the PNG bytes (Uint8Array).
+  snapshotPane: (leafId, name, pngBytes) => ipcRenderer.invoke("pane:snapshot", leafId, name, pngBytes),
+
+  // Proxy activity bumps (one event per pane, throttled in the proxy).
+  onProxyActivity: (cb) => ipcRenderer.on("proxy:activity", (_e, d) => cb(d.leafId)),
   copy: (text) => ipcRenderer.send("clipboard:write", text), // clipboard isn't available in a sandboxed preload
   confirmQuit: () => ipcRenderer.send("app:confirm-quit"),
   log: (scope, msg) => ipcRenderer.send("monica:log", scope, msg),

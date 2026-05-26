@@ -35,6 +35,33 @@ let settings = readSettings();
 function savePref(patch) { settings = { ...settings, ...patch }; writeSettings(settings); }
 let cdpMode = settings.cdpMode === "lan" ? "lan" : "local";
 
+// Defaults + sanitisation for the values exposed via settings:get/patch. Anything
+// that affects the proxy (closeOnDisconnect / slowMo) is forwarded into the proxy
+// at runtime via proxy.setSettings whenever it changes.
+const SETTINGS_DEFAULTS = {
+  closeOnDisconnect: "close",   // "close" | "retain" | "delay"
+  closeDelaySeconds: 10,
+  autoCloseStaleMinutes: 0,     // 0 = off
+  slowMo: 0,                    // ms delay on user-facing CDP commands
+};
+const intPref = (v, fallback) => (Number.isFinite(v) ? Math.max(0, v | 0) : fallback);
+function effectiveSettings() {
+  return {
+    cdpMode,
+    view: settings.view === "tabs" ? "tabs" : "grid",
+    theme: ["light", "dark"].includes(settings.theme) ? settings.theme : "system",
+    closeOnDisconnect: ["close", "retain", "delay"].includes(settings.closeOnDisconnect)
+      ? settings.closeOnDisconnect : SETTINGS_DEFAULTS.closeOnDisconnect,
+    closeDelaySeconds: intPref(settings.closeDelaySeconds, SETTINGS_DEFAULTS.closeDelaySeconds),
+    autoCloseStaleMinutes: intPref(settings.autoCloseStaleMinutes, SETTINGS_DEFAULTS.autoCloseStaleMinutes),
+    slowMo: intPref(settings.slowMo, SETTINGS_DEFAULTS.slowMo),
+  };
+}
+
+// Which panes the user has "pinned" — auto-close-stale and named-session close-on-
+// disconnect both skip these. Renderer is the source of truth; we mirror via IPC.
+const pinned = new Set();
+
 // --- debug log: written to the project dir (truncated each launch) so it's easy
 // to tail/inspect. Logs HTTP hits, CDP requests, connections, and pane/tab churn.
 const LOG_FILE = path.join(__dirname, "monica-debug.log");
@@ -102,6 +129,8 @@ const proxyHooks = {
     mainWindow?.webContents.send("proxy:connection-close", { connectionId }),
   createPane: async (connectionId, url) => ({ leafId: await createPaneInRenderer(connectionId, url) }),
   closePane: (leafId) => mainWindow?.webContents.send("proxy:close-pane", { leafId }),
+  onActivity: (leafId) => mainWindow?.webContents.send("proxy:activity", { leafId }),
+  isPinned: (leafId) => pinned.has(leafId),
 };
 
 // ---- CDP bind controls -----------------------------------------------------
@@ -134,6 +163,45 @@ ipcMain.on("view:set", (_e, mode) => savePref({ view: mode === "grid" ? "grid" :
 // Theme (system|light|dark) — default system (follow the OS); resolved in the renderer.
 ipcMain.handle("theme:get", () => (["light", "dark"].includes(settings.theme) ? settings.theme : "system"));
 ipcMain.on("theme:set", (_e, t) => savePref({ theme: ["light", "dark"].includes(t) ? t : "system" }));
+
+// Generic settings bag (for the new feature toggles: closeOnDisconnect, slowMo, …).
+// Proxy-affecting fields are forwarded into the running proxy immediately.
+ipcMain.handle("settings:get", () => effectiveSettings());
+ipcMain.on("settings:patch", (_e, patch) => {
+  if (!patch || typeof patch !== "object") return;
+  const clean = {};
+  if (["close", "retain", "delay"].includes(patch.closeOnDisconnect)) clean.closeOnDisconnect = patch.closeOnDisconnect;
+  if (Number.isFinite(patch.closeDelaySeconds))     clean.closeDelaySeconds     = Math.max(0, patch.closeDelaySeconds | 0);
+  if (Number.isFinite(patch.autoCloseStaleMinutes)) clean.autoCloseStaleMinutes = Math.max(0, patch.autoCloseStaleMinutes | 0);
+  if (Number.isFinite(patch.slowMo))                clean.slowMo                = Math.max(0, patch.slowMo | 0);
+  if (!Object.keys(clean).length) return;
+  savePref(clean);
+  proxy.setSettings?.(effectiveSettings());
+  log("app", "settings " + JSON.stringify(clean));
+});
+
+// Pin / unpin a pane — pinned panes skip auto-close-stale and close-on-disconnect.
+ipcMain.on("pane:set-pinned", (_e, leafId, isPinned) => {
+  if (isPinned) pinned.add(leafId); else pinned.delete(leafId);
+});
+
+// Pane snapshot — renderer captures via webview.capturePage() and ships us a PNG
+// buffer; we save it to ~/Downloads and tell the renderer where it ended up.
+ipcMain.handle("pane:snapshot", async (_e, leafId, name, pngBytes) => {
+  try {
+    const buf = Buffer.from(pngBytes);
+    const dir = app.getPath("downloads");
+    const safe = String(name || ("pane-" + leafId)).replace(/[^a-z0-9_-]+/gi, "-").slice(0, 60) || ("pane-" + leafId);
+    const ts = new Date().toISOString().replace(/[:.]/g, "-").replace(/-\d{3}Z$/, "Z");
+    const file = path.join(dir, "monica-" + safe + "-" + ts + ".png");
+    await fs.promises.writeFile(file, buf);
+    log("snap", "saved " + file + " (" + buf.length + " bytes)");
+    return { file };
+  } catch (e) {
+    log("snap", "error " + String(e?.message || e));
+    return { error: String(e?.message || e) };
+  }
+});
 
 ipcMain.handle("cdp:set", async (e, requested) => {
   const mode = requested === "lan" ? "lan" : "local";
@@ -217,10 +285,17 @@ app.whenReady().then(async () => {
   buildMenu();
   createWindow();
   try {
-    await proxy.start({ bindAddr: addrFor(cdpMode), hooks: proxyHooks, log });
+    await proxy.start({ bindAddr: addrFor(cdpMode), hooks: proxyHooks, log, settings: effectiveSettings() });
   } catch (err) {
     dialog.showErrorBox("monica CDP proxy failed to start", String(err?.message || err));
   }
+  // Auto-close-stale: every 30s, ask the proxy to prune anything older than the
+  // configured threshold (skipping pinned panes). Setting 0 disables.
+  setInterval(() => {
+    const m = effectiveSettings().autoCloseStaleMinutes;
+    if (m <= 0) return;
+    proxy.sweepStale?.(Date.now() - m * 60000, (leafId) => pinned.has(leafId));
+  }, 30000);
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

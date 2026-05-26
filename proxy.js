@@ -30,8 +30,42 @@ let logFn = () => {};
 
 let connSeq = 0;
 const hostCounters = new Map(); // host -> count
-const targetToPane = new Map(); // CDP targetId -> { connectionId, leafId }
+const targetToPane = new Map(); // CDP targetId -> { connectionId, leafId, scopeKey, lastActivity }
 let createChain = Promise.resolve(); // serialize createTarget handling for clean correlation
+
+// Runtime-tunable behaviour driven by monica-settings.json (main pushes via setSettings).
+let cfg = { closeOnDisconnect: "close", closeDelaySeconds: 10, slowMo: 0 };
+// Pending close timers keyed by session name (for closeOnDisconnect = "delay").
+const pendingCloseBySession = new Map();
+
+// Per-pane activity throttling: only fire onActivity at most once per 500ms per pane,
+// otherwise the renderer's ticker is enough and we don't spam IPC.
+const ACTIVITY_THROTTLE_MS = 500;
+const lastActivityEmit = new Map(); // leafId -> ts
+function bumpActivity(leafId) {
+  const now = Date.now();
+  for (const e of targetToPane.values()) if (e.leafId === leafId) e.lastActivity = now;
+  const last = lastActivityEmit.get(leafId) || 0;
+  if (now - last >= ACTIVITY_THROTTLE_MS) { lastActivityEmit.set(leafId, now); hooks.onActivity?.(leafId); }
+}
+function bumpFromMessage(ctx, msg) {
+  // Per-target message → bump just that pane. Otherwise bump every pane on this
+  // connection (browser-level chatter still means "the agent is doing something here").
+  const sid = msg && msg.sessionId;
+  if (sid && targetToPane.has(sid)) { bumpActivity(targetToPane.get(sid).leafId); return; }
+  if (ctx.connectionId == null) return;
+  for (const e of targetToPane.values()) if (e.connectionId === ctx.connectionId) bumpActivity(e.leafId);
+}
+
+// Methods we slow on the client→backend path when slowMo > 0. Limited to user-facing
+// actions so plumbing (Page.enable / Runtime.enable / Target.* / Network.enable …)
+// isn't delayed and clients don't desync during attach.
+const SLOW_METHODS = new Set([
+  "Page.navigate", "Page.reload", "Page.captureScreenshot",
+  "Input.dispatchMouseEvent", "Input.dispatchKeyEvent", "Input.dispatchTouchEvent",
+  "Input.insertText", "Input.dispatchDragEvent",
+  "Runtime.evaluate", "Runtime.callFunctionOn",
+]);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -191,8 +225,13 @@ function onConnection(client, req) {
     ctx.pending = [];
   });
   backend.on("message", (d) => {
-    const out = filterBackendToClient(ctx, typeof d === "string" ? d : d.toString());
+    const text = typeof d === "string" ? d : d.toString();
+    const out = filterBackendToClient(ctx, text);
     if (out !== null && client.readyState === WebSocket.OPEN) client.send(out);
+    // Bump activity for whatever pane this message concerns (events + responses).
+    if (ctx.connectionId != null) {
+      try { bumpFromMessage(ctx, JSON.parse(text)); } catch {}
+    }
   });
   backend.on("close", () => { try { client.close(); } catch {} });
   backend.on("error", () => { try { client.close(); } catch {} });
@@ -211,11 +250,28 @@ function onConnection(client, req) {
     // An ANONYMOUS connection (e.g. puppeteer.disconnect()) is a mere detach: retain
     // its panes, matching real Chrome, so a human can take over after the agent leaves.
     if (ctx.named) {
-      for (const [tid, e] of targetToPane) {
-        if (e.connectionId !== ctx.connectionId) continue;
-        targetToPane.delete(tid);
-        logFn("proxy", "session end #" + ctx.connectionId, "-> close pane leaf=" + e.leafId);
-        hooks.closePane?.(e.leafId);
+      const closeNow = () => {
+        for (const [tid, e] of targetToPane) {
+          if (e.connectionId !== ctx.connectionId) continue;
+          if (hooks.isPinned?.(e.leafId)) {
+            logFn("proxy", "skip close (pinned) leaf=" + e.leafId);
+            continue;
+          }
+          targetToPane.delete(tid);
+          logFn("proxy", "session end #" + ctx.connectionId, "-> close pane leaf=" + e.leafId);
+          hooks.closePane?.(e.leafId);
+        }
+      };
+      const mode = cfg.closeOnDisconnect;
+      if (mode === "retain") {
+        logFn("conn", "session disconnect #" + ctx.connectionId + " — retain (per setting)");
+      } else if (mode === "delay") {
+        const ms = Math.max(0, (cfg.closeDelaySeconds | 0)) * 1000;
+        logFn("conn", "session disconnect #" + ctx.connectionId + " — delay close " + ms + "ms");
+        const t = setTimeout(() => { pendingCloseBySession.delete(ctx.session || ""); closeNow(); }, ms);
+        if (ctx.session) pendingCloseBySession.set(ctx.session, t);
+      } else {
+        closeNow();
       }
     }
     hooks.onConnectionClose?.(ctx.connectionId);
@@ -241,6 +297,7 @@ function openConnection(ctx, fullUrl, req) {
   // Scope key isolates targets: a stable ?session= for named sessions, else a
   // per-connection key. Independent of the (async-refined) display name.
   ctx.scopeKey = session || "conn-" + ctx.connectionId;
+  ctx.session = session || null;
   // A named ?session= owns its panes: when its connection drops we treat that as
   // the session ending and discard them (see the close handler). An anonymous
   // connection is a mere detach and its panes are retained.
@@ -250,6 +307,12 @@ function openConnection(ctx, fullUrl, req) {
   hostCounters.set(baseHost, n);
   const name = session || baseHost + ":#" + n;
   logFn("conn", "open #" + ctx.connectionId, "session=" + (session || "-"), "name=" + name, "scope=" + ctx.scopeKey);
+  // Cancel any pending delayed close for this same session — a reconnect happened.
+  if (session && pendingCloseBySession.has(session)) {
+    clearTimeout(pendingCloseBySession.get(session));
+    pendingCloseBySession.delete(session);
+    logFn("conn", "cancel pending close for session=" + session);
+  }
   hooks.onConnectionOpen?.(ctx.connectionId, name);
 
   if (!session && baseHost !== "localhost") {
@@ -276,6 +339,7 @@ function handleClientMessage(ctx, data) {
   if (msg.method) {
     logFn("cdp", "→", msg.method, msg.id != null ? "#" + msg.id : "", msg.sessionId ? "@" + String(msg.sessionId).slice(0, 8) : "");
   }
+  bumpFromMessage(ctx, msg);
 
   // monica panes render at their on-screen size. Neutralize client viewport
   // emulation (puppeteer.connect defaults to an 800x600 override) so the page
@@ -300,6 +364,12 @@ function handleClientMessage(ctx, data) {
       return;
     }
   }
+  // Slow-motion: delay user-facing commands by cfg.slowMo (puppeteer-style demo pacing).
+  // We don't slow plumbing (Page.enable/Target.*/Network.enable …) so attach doesn't desync.
+  if (cfg.slowMo > 0 && msg.method && SLOW_METHODS.has(msg.method)) {
+    setTimeout(() => forward(ctx, text), cfg.slowMo);
+    return;
+  }
   forward(ctx, text);
 }
 
@@ -309,7 +379,7 @@ async function doCreate(ctx, msg) {
   const { leafId } = (await hooks.createPane(ctx.connectionId, url)) || {};
   const targetId = await waitForNewWebview(before, 10000);
   if (!targetId) throw new Error("monica: new pane did not register a CDP target");
-  targetToPane.set(targetId, { connectionId: ctx.connectionId, leafId, scopeKey: ctx.scopeKey });
+  targetToPane.set(targetId, { connectionId: ctx.connectionId, leafId, scopeKey: ctx.scopeKey, lastActivity: Date.now() });
   logFn("proxy", "createTarget url=" + url, "scope=" + ctx.scopeKey, "-> pane leaf=" + leafId, "target=" + targetId);
   reply(ctx.client, { id: msg.id, result: { targetId } });
 }
@@ -338,6 +408,7 @@ async function start(opts) {
   hooks = opts.hooks || {};
   bindAddr = opts.bindAddr || "127.0.0.1";
   if (opts.log) logFn = opts.log;
+  if (opts.settings) setSettings(opts.settings);
   await waitForInternal();
   await listen(bindAddr);
 }
@@ -348,4 +419,24 @@ async function setBind(addr) {
   await listen(addr);
 }
 
-module.exports = { start, setBind, PUBLIC_PORT };
+function setSettings(next) {
+  if (!next || typeof next !== "object") return;
+  if (typeof next.closeOnDisconnect === "string") cfg.closeOnDisconnect = next.closeOnDisconnect;
+  if (Number.isFinite(next.closeDelaySeconds)) cfg.closeDelaySeconds = Math.max(0, next.closeDelaySeconds | 0);
+  if (Number.isFinite(next.slowMo)) cfg.slowMo = Math.max(0, next.slowMo | 0);
+  logFn("proxy", "settings", JSON.stringify(cfg));
+}
+
+// Auto-close-stale sweep: main calls this on a timer; we close any pane whose last
+// CDP activity is older than `cutoff` and that isn't pinned.
+function sweepStale(cutoff, isPinned) {
+  for (const [tid, e] of targetToPane) {
+    if ((e.lastActivity || 0) >= cutoff) continue;
+    if (isPinned && isPinned(e.leafId)) continue;
+    targetToPane.delete(tid);
+    logFn("proxy", "stale close leaf=" + e.leafId);
+    hooks.closePane?.(e.leafId);
+  }
+}
+
+module.exports = { start, setBind, setSettings, sweepStale, PUBLIC_PORT };
