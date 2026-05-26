@@ -46,6 +46,9 @@ const dlog = (scope, msg) => window.api?.log?.(scope, msg); // -> monica-debug.l
 
 // Inline icon markup for buttons that live inside a pane chrome (we don't load
 // Iconoir at runtime — these are copied from node_modules/iconoir/icons/regular).
+const ICON_TICK =
+  '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke-width="2">' +
+  '<path d="M5 12L10 17L19 7" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const ICON_PIN =
   '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke-width="1.5">' +
   '<path d="M9.5 14.5L3 21" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>' +
@@ -116,6 +119,7 @@ function createPaneEl(p) {
     '<span class="pname"></span>' +
     '<span class="ptitle"></span>' +
     '<span class="page"></span>' +
+    '<span class="pchrome-spacer"></span>' +
     '<span class="ppill" hidden>you</span>' +
     '<button class="pchrome-btn ppin" title="Pin pane (skip auto-close)">' + ICON_PIN + '</button>' +
     '<button class="pchrome-btn psnap" title="Snapshot pane to ~/Downloads">' + ICON_SNAP + '</button>' +
@@ -425,7 +429,22 @@ async function snapshotPaneEl(p, wv) {
     const wcId = wv.getWebContentsId();
     const res = await window.api?.snapshotPane?.(p.id, p.name, wcId);
     dlog("snap", "pane=" + p.id + " " + (res?.file || res?.error || ""));
+    if (res && res.file) flashSnapOK(p.id); // brief tick over the camera glyph
   } catch (e) { dlog("snap", "error " + (e?.message || e)); }
+}
+
+function flashSnapOK(paneId) {
+  const btn = paneEls.get(paneId)?.querySelector(".psnap");
+  if (!btn) return;
+  const prev = btn.innerHTML;
+  btn.innerHTML = ICON_TICK;
+  btn.classList.add("ok");
+  btn.title = "Saved to ~/Downloads";
+  setTimeout(() => {
+    btn.innerHTML = prev;
+    btn.classList.remove("ok");
+    btn.title = "Snapshot pane to ~/Downloads";
+  }, 1200);
 }
 
 // ---- theme -----------------------------------------------------------------

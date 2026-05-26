@@ -3,6 +3,7 @@
 :root {
   --gutter: 6px;
   --danger: #e5534b; /* destructive hover (close buttons) */
+  --success: #34c66c; /* one-shot confirmations (snapshot saved, etc.) */
 }
 
 /* Dark — the brand navy/blue as a cockpit */
@@ -278,7 +279,11 @@ body { display: flex; flex-direction: column; }
 }
 
 .pane-chrome .pname { color: var(--accent); white-space: nowrap; flex: 0 0 auto; font-weight: 600; }
-.pane-chrome .ptitle { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+/* Title sizes to its content (with ellipsis when overflowing). The spacer below
+   absorbs the slack, keeping the age timer tight to the title and pushing the
+   right-side cluster (pill + buttons) to the edge. */
+.pane-chrome .ptitle { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
+.pane-chrome .pchrome-spacer { flex: 1 1 auto; min-width: 0; }
 
 /* Last-interacted-via-CDP timer */
 .pane-chrome .page {
@@ -309,6 +314,9 @@ body { display: flex; flex-direction: column; }
 .pane-chrome .pchrome-btn .ico { width: 13px; height: 13px; display: block; }
 .pane-chrome:hover .pchrome-btn { opacity: 1; }
 .pane-chrome .pchrome-btn:hover { color: var(--text); }
+/* Brief confirmation flash (e.g. snapshot saved): force-visible + success color */
+.pane-chrome .pchrome-btn.ok { opacity: 1; color: var(--success); }
+.pane-chrome .pchrome-btn.ok:hover { color: var(--success); }
 
 /* Pinned: the pin button stays visible and accents */
 .pane.pinned .pane-chrome .ppin { opacity: 1; color: var(--accent); }
