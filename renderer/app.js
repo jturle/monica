@@ -44,6 +44,23 @@ function newTabUrl() {
 const isNewTabUrl = (u) => !!u && u.startsWith("data:text/html");
 const dlog = (scope, msg) => window.api?.log?.(scope, msg); // -> monica-debug.log
 
+// Inline icon markup for buttons that live inside a pane chrome (we don't load
+// Iconoir at runtime — these are copied from node_modules/iconoir/icons/regular).
+const ICON_PIN =
+  '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke-width="1.5">' +
+  '<path d="M9.5 14.5L3 21" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>' +
+  '<path d="M5.00007 9.48528L14.1925 18.6777L15.8895 16.9806L15.4974 13.1944L21.0065 8.5211L15.1568 2.67141L10.4834 8.18034L6.69713 7.78823L5.00007 9.48528Z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const ICON_SNAP =
+  '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke-width="1.5">' +
+  '<path d="M10 21.4V14.3937C10 14.0623 10.2686 13.7937 10.6 13.7937H11.7728C11.9768 13.7937 12.1667 13.6901 12.2772 13.5186L13.7228 11.275C13.8333 11.1036 14.0232 11 14.2272 11H17.7728C17.9768 11 18.1667 11.1036 18.2772 11.275L19.7228 13.5186C19.8333 13.6901 20.0232 13.7937 20.2272 13.7937H21.4C21.7314 13.7937 22 14.0623 22 14.3937V21.4C22 21.7314 21.7314 22 21.4 22H10.6C10.2686 22 10 21.7314 10 21.4Z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>' +
+  '<path d="M16 19C17.1046 19 18 18.1046 18 17C18 15.8954 17.1046 15 16 15C14.8954 15 14 15.8954 14 17C14 18.1046 14.8954 19 16 19Z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>' +
+  '<path d="M3 18V21H5.5" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>' +
+  '<path d="M3 9.5L3 14.5" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>' +
+  '<path d="M3 6V3H6" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>' +
+  '<path d="M9.5 3L14.5 3" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>' +
+  '<path d="M18 3H21V5.5" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>' +
+  '<path d="M21 10V8.5" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
 let paneSeq = 0; // pane ids (also the "leafId" the proxy uses)
 let panes = []; // [{ id, name, kind:"user"|"conn", url, session, connectionId }]
 let selectedId = null;
@@ -52,6 +69,8 @@ let viewMode = "tabs";
 const paneEls = new Map(); // pane id -> .pane element
 const connSessions = new Map(); // connectionId -> session label
 const sessionCounts = new Map(); // session label -> panes created (stable naming)
+const lastActivity = new Map(); // pane id -> Date.now() of last CDP/nav activity
+const pinnedPanes = new Set(); // pane ids the user has pinned (skip auto-close)
 
 const paneById = (id) => panes.find((p) => p.id === id) || null;
 
@@ -93,7 +112,14 @@ function createPaneEl(p) {
   const chrome = document.createElement("div");
   chrome.className = "pane-chrome";
   chrome.innerHTML =
-    '<span class="dot"></span><span class="pname"></span><span class="ptitle"></span><button class="pclose" title="Close pane">×</button>';
+    '<span class="dot"></span>' +
+    '<span class="pname"></span>' +
+    '<span class="ptitle"></span>' +
+    '<span class="page"></span>' +
+    '<span class="ppill" hidden>you</span>' +
+    '<button class="pchrome-btn ppin" title="Pin pane (skip auto-close)">' + ICON_PIN + '</button>' +
+    '<button class="pchrome-btn psnap" title="Snapshot pane to ~/Downloads">' + ICON_SNAP + '</button>' +
+    '<button class="pclose" title="Close pane">×</button>';
   chrome.querySelector(".pname").textContent = p.name;
   chrome.querySelector(".ptitle").textContent = isBlank(p.url) ? "new tab" : "";
 
@@ -108,11 +134,21 @@ function createPaneEl(p) {
 
   chrome.addEventListener("mousedown", () => select(p.id));
   chrome.querySelector(".pclose").addEventListener("click", (e) => { e.stopPropagation(); closePane(p.id); });
+  chrome.querySelector(".ppin").addEventListener("click", (e) => { e.stopPropagation(); togglePinned(p.id); });
+  chrome.querySelector(".psnap").addEventListener("click", (e) => { e.stopPropagation(); snapshotPaneEl(p, wv); });
 
-  wv.addEventListener("focus", () => select(p.id));
+  // The "you" take-over pill — shown while a HUMAN focuses a pane that an agent is
+  // currently driving (kind:"conn"), so it's clear who's at the wheel.
+  wv.addEventListener("focus", () => {
+    select(p.id);
+    if (p.kind === "conn") chrome.querySelector(".ppill").hidden = false;
+  });
+  wv.addEventListener("blur", () => { chrome.querySelector(".ppill").hidden = true; });
+
   wv.addEventListener("page-title-updated", (e) => {
     chrome.querySelector(".pname").textContent = p.name;
     chrome.querySelector(".ptitle").textContent = e.title || (isBlank(p.url) ? "new tab" : p.url);
+    bumpLocalActivity(p.id);
   });
   const setUrl = (u) => {
     if (isNewTabUrl(u)) return; // the placeholder loaded; keep the pane logically blank
@@ -122,9 +158,14 @@ function createPaneEl(p) {
       if (label !== p.name) { p.name = label; chrome.querySelector(".pname").textContent = label; renderTabs(); }
     }
     if (p.id === selectedId) omnibox.value = isBlank(u) ? "" : u;
+    bumpLocalActivity(p.id);
   };
   wv.addEventListener("did-navigate", (e) => setUrl(e.url));
   wv.addEventListener("did-navigate-in-page", (e) => setUrl(e.url));
+
+  // Reflect the initial pinned state if this pane is being re-created somehow.
+  if (pinnedPanes.has(p.id)) el.classList.add("pinned");
+  lastActivity.set(p.id, Date.now());
 
   paneEls.set(p.id, el);
   dlog("pane", "create id=" + p.id + " name=" + p.name + " url=" + p.url);
@@ -334,6 +375,62 @@ function toggleView() {
   setView(viewMode === "grid" ? "tabs" : "grid");
 }
 
+// ---- activity / pin / snapshot --------------------------------------------
+
+function pulseDot(paneId) {
+  const dot = paneEls.get(paneId)?.querySelector(".dot");
+  if (!dot) return;
+  dot.classList.remove("pulse");
+  void dot.offsetWidth; // restart the animation
+  dot.classList.add("pulse");
+}
+
+function bumpLocalActivity(paneId) {
+  lastActivity.set(paneId, Date.now());
+  pulseDot(paneId);
+}
+
+// Human-friendly "how long ago" suffix shown in the chrome bar.
+function ago(ms) {
+  if (ms < 5000) return "just now";
+  if (ms < 60000) return Math.floor(ms / 1000) + "s";
+  if (ms < 3600000) return Math.floor(ms / 60000) + "m";
+  return Math.floor(ms / 3600000) + "h";
+}
+
+function tickPaneAges() {
+  const now = Date.now();
+  for (const p of panes) {
+    const el = paneEls.get(p.id);
+    if (!el) continue;
+    const age = el.querySelector(".page");
+    if (!age) continue;
+    const last = lastActivity.get(p.id);
+    age.textContent = last ? ago(now - last) : "";
+  }
+}
+
+function togglePinned(paneId) {
+  const p = paneById(paneId);
+  if (!p) return;
+  const nowPinned = !pinnedPanes.has(paneId);
+  if (nowPinned) pinnedPanes.add(paneId); else pinnedPanes.delete(paneId);
+  paneEls.get(paneId)?.classList.toggle("pinned", nowPinned);
+  window.api?.setPinned?.(paneId, nowPinned);
+}
+
+async function snapshotPaneEl(p, wv) {
+  if (!wv?.capturePage) return;
+  try {
+    const img = await wv.capturePage();
+    const png = img.toPNG ? img.toPNG() : null;
+    if (!png) { dlog("snap", "no toPNG on capture result"); return; }
+    const bytes = new Uint8Array(png);
+    const res = await window.api?.snapshotPane?.(p.id, p.name, bytes);
+    dlog("snap", "pane=" + p.id + " " + (res?.file || res?.error || ""));
+  } catch (e) { dlog("snap", "error " + (e?.message || e)); }
+}
+
 // ---- theme -----------------------------------------------------------------
 // pref is system | light | dark (persisted); "system" follows the OS and tracks
 // live changes. The toggle button flips to an explicit light/dark.
@@ -430,6 +527,13 @@ window.api?.onProxyCreatePane?.(({ connectionId, url, reqId }) => {
 });
 
 window.api?.onProxyClosePane?.((leafId) => closePane(leafId));
+
+// Proxy fires this (throttled per-pane) every time a CDP message touches a pane.
+// Bump the timestamp + pulse the chrome dot.
+window.api?.onProxyActivity?.((leafId) => {
+  lastActivity.set(leafId, Date.now());
+  pulseDot(leafId);
+});
 
 // ---- CDP bind toggle + copy ------------------------------------------------
 
@@ -531,6 +635,56 @@ window.matchMedia?.("(prefers-color-scheme: dark)")?.addEventListener?.("change"
   if (themePref === "system") applyTheme(); // follow the OS while no explicit choice is set
 });
 
+// ---- settings popover ------------------------------------------------------
+
+const settingsToggle = document.getElementById("settings-toggle");
+const settingsPopover = document.getElementById("settings-popover");
+const setCloseOnDisconnect = document.getElementById("set-closeOnDisconnect");
+const setCloseDelaySeconds = document.getElementById("set-closeDelaySeconds");
+const setAutoCloseStaleMinutes = document.getElementById("set-autoCloseStaleMinutes");
+const setSlowMo = document.getElementById("set-slowMo");
+const rowCloseDelay = document.getElementById("row-closeDelay");
+
+function refreshCloseDelayRowVisibility() {
+  if (rowCloseDelay) rowCloseDelay.hidden = setCloseOnDisconnect?.value !== "delay";
+}
+function applySettingsToForm(s) {
+  if (!s) return;
+  if (setCloseOnDisconnect) setCloseOnDisconnect.value = s.closeOnDisconnect;
+  if (setCloseDelaySeconds) setCloseDelaySeconds.value = s.closeDelaySeconds;
+  if (setAutoCloseStaleMinutes) setAutoCloseStaleMinutes.value = String(s.autoCloseStaleMinutes);
+  if (setSlowMo) setSlowMo.value = String(s.slowMo);
+  refreshCloseDelayRowVisibility();
+}
+function patch(key, val) { window.api?.patchSettings?.({ [key]: val }); }
+
+settingsToggle?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  settingsPopover.hidden = !settingsPopover.hidden;
+});
+// Click-outside / Escape close
+document.addEventListener("mousedown", (e) => {
+  if (settingsPopover.hidden) return;
+  if (settingsPopover.contains(e.target) || settingsToggle.contains(e.target)) return;
+  settingsPopover.hidden = true;
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !settingsPopover.hidden) settingsPopover.hidden = true;
+});
+setCloseOnDisconnect?.addEventListener("change", () => {
+  patch("closeOnDisconnect", setCloseOnDisconnect.value);
+  refreshCloseDelayRowVisibility();
+});
+setCloseDelaySeconds?.addEventListener("change", () => {
+  patch("closeDelaySeconds", Math.max(0, parseInt(setCloseDelaySeconds.value, 10) || 0));
+});
+setAutoCloseStaleMinutes?.addEventListener("change", () => {
+  patch("autoCloseStaleMinutes", parseInt(setAutoCloseStaleMinutes.value, 10) || 0);
+});
+setSlowMo?.addEventListener("change", () => {
+  patch("slowMo", parseInt(setSlowMo.value, 10) || 0);
+});
+
 // ---- boot ------------------------------------------------------------------
 
 window.api?.onToggleView?.(() => toggleView());
@@ -553,3 +707,7 @@ renderWelcome();
 initCdpToggle();
 window.api?.getViewPref?.().then((v) => { if (v) applyView(v); }); // restore last view
 window.api?.getThemePref?.().then((p) => { if (p) { themePref = p; applyTheme(); } }); // restore theme
+window.api?.getSettings?.().then(applySettingsToForm); // populate the popover form
+
+// "x s ago" timer in pane chromes; 1s cadence is plenty.
+setInterval(tickPaneAges, 1000);
