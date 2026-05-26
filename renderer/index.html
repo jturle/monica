@@ -11,17 +11,40 @@
       <div class="topbar-row controls">
         <div class="brand">monica</div>
         <input id="omnibox" placeholder="Enter URL and press Enter…" spellcheck="false" />
-        <div class="seg view-toggle" id="view-toggle" title="Switch layout (⌘G)">
-          <button data-view="grid" class="active">Grid</button>
-          <button data-view="tabs">Tabs</button>
-        </div>
-        <button class="icon-btn" id="theme-toggle" title="Toggle light / dark">☾</button>
+        <!-- View toggle (single icon button; shows the destination — clicking switches).
+             Icons from iconoir (regular/line, MIT). -->
+        <button class="icon-btn ico-toggle" id="view-toggle" data-view="grid" title="Switch layout (⌘G)">
+          <svg class="ico ico-grid" viewBox="0 0 24 24" fill="none" stroke-width="1.5">
+            <path d="M14 20.4V14.6C14 14.2686 14.2686 14 14.6 14H20.4C20.7314 14 21 14.2686 21 14.6V20.4C21 20.7314 20.7314 21 20.4 21H14.6C14.2686 21 14 20.7314 14 20.4Z" stroke="currentColor"/>
+            <path d="M3 20.4V14.6C3 14.2686 3.26863 14 3.6 14H9.4C9.73137 14 10 14.2686 10 14.6V20.4C10 20.7314 9.73137 21 9.4 21H3.6C3.26863 21 3 20.7314 3 20.4Z" stroke="currentColor"/>
+            <path d="M14 9.4V3.6C14 3.26863 14.2686 3 14.6 3H20.4C20.7314 3 21 3.26863 21 3.6V9.4C21 9.73137 20.7314 10 20.4 10H14.6C14.2686 10 14 9.73137 14 9.4Z" stroke="currentColor"/>
+            <path d="M3 9.4V3.6C3 3.26863 3.26863 3 3.6 3H9.4C9.73137 3 10 3.26863 10 3.6V9.4C10 9.73137 9.73137 10 9.4 10H3.6C3.26863 10 3 9.73137 3 9.4Z" stroke="currentColor"/>
+          </svg>
+          <svg class="ico ico-tabs" viewBox="0 0 24 24" fill="none" stroke-width="1.5">
+            <path d="M22 8H15.5M9 4V8H15.5M15.5 8V4" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M2 17.7143V6.28571C2 5.02335 2.99492 4 4.22222 4H19.7778C21.0051 4 22 5.02335 22 6.28571V17.7143C22 18.9767 21.0051 20 19.7778 20H4.22222C2.99492 20 2 18.9767 2 17.7143Z" stroke="currentColor"/>
+          </svg>
+        </button>
+        <button class="icon-btn ico-toggle" id="theme-toggle" data-theme="light" title="Toggle light / dark">
+          <svg class="ico ico-moon" viewBox="0 0 24 24" fill="none" stroke-width="1.5">
+            <path d="M3 11.5066C3 16.7497 7.25034 21 12.4934 21C16.2209 21 19.4466 18.8518 21 15.7259C12.4934 15.7259 8.27411 11.5066 8.27411 3C5.14821 4.55344 3 7.77915 3 11.5066Z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <svg class="ico ico-sun" viewBox="0 0 24 24" fill="none" stroke-width="1.5">
+            <path d="M12 18C15.3137 18 18 15.3137 18 12C18 8.68629 15.3137 6 12 6C8.68629 6 6 8.68629 6 12C6 15.3137 8.68629 18 12 18Z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M22 12L23 12" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 2V1" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 23V22" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 20L19 19" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 4L19 5" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 20L5 19" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 4L5 5" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/><path d="M1 12L2 12" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
         <div class="cdp-group">
           <span class="cdp" id="cdp-badge" title="Chrome DevTools Protocol endpoint">CDP :9222</span>
-          <div class="cdp-toggle" id="cdp-toggle" title="Re-bind CDP (restarts monica)">
-            <button data-mode="local" class="active">Local</button>
-            <button data-mode="lan">LAN</button>
-          </div>
+          <button class="icon-btn lan-toggle" id="cdp-toggle" title="Expose CDP on your LAN">
+            <svg class="ico ico-globe" viewBox="0 0 24 24" fill="none" stroke-width="1.5">
+              <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M2.5 12.5L8 14.5L7 18L8 21" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M17 20.5L16.5 18L14 17V13.5L17 12.5L21.5 13" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M19 5.5L18.5 7L15 7.5V10.5L17.5 9.5H19.5L21.5 10.5" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M2.5 10.5L5 8.5L7.5 8L9.5 5L8.5 3" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
         </div>
       </div>
       <div class="topbar-row tabs-row">

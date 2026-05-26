@@ -175,50 +175,6 @@ body { display: flex; flex-direction: column; }
   border-color: var(--warn-line);
   background: var(--warn-bg);
 }
-.cdp-toggle {
-  display: flex;
-  height: 28px;
-  border: 1px solid var(--line-2);
-  border-radius: 7px;
-  overflow: hidden;
-}
-.cdp-toggle button {
-  display: flex;
-  align-items: center;
-  border: none;
-  background: var(--well);
-  color: var(--muted);
-  font: inherit;
-  font-size: 11px;
-  padding: 0 10px;
-  cursor: pointer;
-}
-.cdp-toggle button + button { border-left: 1px solid var(--line-2); }
-.cdp-toggle button.active { background: var(--accent-dim); color: var(--accent-fg); }
-.cdp-toggle button[data-mode="lan"].active { background: var(--warn-line); color: var(--warn-fg); }
-
-.view-toggle {
-  display: flex;
-  height: 28px;
-  border: 1px solid var(--line-2);
-  border-radius: 7px;
-  overflow: hidden;
-  -webkit-app-region: no-drag;
-}
-.view-toggle button {
-  display: flex;
-  align-items: center;
-  border: none;
-  background: var(--well);
-  color: var(--muted);
-  font: inherit;
-  font-size: 11px;
-  padding: 0 10px;
-  cursor: pointer;
-}
-.view-toggle button + button { border-left: 1px solid var(--line-2); }
-.view-toggle button.active { background: var(--accent-dim); color: var(--accent-fg); }
-
 .icon-btn {
   display: inline-flex;
   align-items: center;
@@ -229,12 +185,27 @@ body { display: flex; flex-direction: column; }
   border-radius: 7px;
   background: var(--well);
   color: var(--muted);
-  font-size: 14px;
-  line-height: 1;
   cursor: pointer;
   -webkit-app-region: no-drag;
 }
 .icon-btn:hover { color: var(--text); }
+.icon-btn .ico { width: 17px; height: 17px; display: block; }
+
+/* dual-icon toggles (view, theme): both glyphs in the DOM, one visible at a time.
+   The visible one is the DESTINATION — clicking switches to it, matching the
+   convention used elsewhere on the bar. */
+.ico-toggle[data-view="grid"] .ico-grid,
+.ico-toggle[data-view="tabs"] .ico-tabs,
+.ico-toggle[data-theme="light"] .ico-sun,
+.ico-toggle[data-theme="dark"]  .ico-moon { display: none; }
+
+/* LAN toggle is a single globe with an off/on state (default off = local) */
+.lan-toggle.active {
+  color: var(--warn);
+  border-color: var(--warn-line);
+  background: var(--warn-bg);
+}
+.lan-toggle.active:hover { background: var(--warn-soft); }
 
 /* ---- stage / panes ---- */
 #stage { position: relative; flex: 1; overflow: hidden; }

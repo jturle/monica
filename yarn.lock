@@ -358,6 +358,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"iconoir@npm:^7.11.0":
+  version: 7.11.0
+  resolution: "iconoir@npm:7.11.0"
+  checksum: 10c0/c5c6e70799d830ff3ec83da2355e4944fa8e66d63817d7e76b4fb769ccc3b529d1808806675a59e1441c374402bf776bbd5cf3350b68d355145fd37c9c0781fd
+  languageName: node
+  linkType: hard
+
 "isbinaryfile@npm:^4.0.8":
   version: 4.0.10
   resolution: "isbinaryfile@npm:4.0.10"
@@ -408,6 +415,7 @@ __metadata:
   dependencies:
     "@electron/packager": "npm:^20.0.0"
     electron: "npm:^42.2.0"
+    iconoir: "npm:^7.11.0"
     ws: "npm:^8.21.0"
   languageName: unknown
   linkType: soft

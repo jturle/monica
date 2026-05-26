@@ -320,7 +320,10 @@ function beginRename(p, pill, nameEl) {
 function applyView(mode) {
   viewMode = mode === "grid" ? "grid" : "tabs";
   stage.dataset.view = viewMode;
-  viewToggle?.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.view === viewMode));
+  if (viewToggle) {
+    viewToggle.dataset.view = viewMode; // CSS shows the destination icon (opposite of current)
+    viewToggle.title = "Switch to " + (viewMode === "grid" ? "tabs" : "grid") + " (⌘G)";
+  }
   layout();
 }
 function setView(mode) { // user action: apply + persist (alongside cdpMode in monica-settings.json)
@@ -342,7 +345,7 @@ function applyTheme() {
   document.documentElement.dataset.theme = t;
   const btn = document.getElementById("theme-toggle");
   if (btn) {
-    btn.textContent = t === "dark" ? "☀" : "☾";
+    btn.dataset.theme = t; // CSS shows the destination icon
     btn.title = "Switch to " + (t === "dark" ? "light" : "dark") + " theme";
   }
   // recolor any open blank panes so their placeholder matches the new theme
@@ -475,15 +478,20 @@ function renderWelcome() {
   });
 }
 
+let cdpMode = "local";
 function applyCdpState({ mode, port, lanIp }) {
-  const lan = mode === "lan";
+  cdpMode = mode === "lan" ? "lan" : "local";
+  const lan = cdpMode === "lan";
   const host = lan ? lanIp : "127.0.0.1";
   cdpEndpoint = "http://" + host + ":" + port;
   cdpLabel = lan ? "CDP " + host + ":" + port : "CDP :" + port;
   cdpBadge.title = "Click to copy " + cdpEndpoint;
   cdpBadge.textContent = cdpLabel;
   cdpBadge.classList.toggle("lan", lan);
-  cdpToggle.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
+  cdpToggle.classList.toggle("active", lan);
+  cdpToggle.title = lan
+    ? "CDP exposed on LAN — click to switch back to local-only"
+    : "Local-only — click to expose CDP on your LAN";
   renderWelcome();
 }
 
@@ -511,15 +519,12 @@ cdpBadge.addEventListener("click", () => {
   copyTimer = setTimeout(() => (cdpBadge.textContent = cdpLabel), 900);
 });
 
-cdpToggle.addEventListener("click", async (e) => {
-  const b = e.target.closest("button");
-  if (b && window.api?.setCdpMode) applyCdpState(await window.api.setCdpMode(b.dataset.mode));
+cdpToggle.addEventListener("click", async () => {
+  if (!window.api?.setCdpMode) return;
+  applyCdpState(await window.api.setCdpMode(cdpMode === "lan" ? "local" : "lan"));
 });
 
-viewToggle?.addEventListener("click", (e) => {
-  const b = e.target.closest("button");
-  if (b) setView(b.dataset.view);
-});
+viewToggle?.addEventListener("click", () => toggleView());
 
 document.getElementById("theme-toggle")?.addEventListener("click", toggleTheme);
 window.matchMedia?.("(prefers-color-scheme: dark)")?.addEventListener?.("change", () => {
