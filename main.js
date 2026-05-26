@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, dialog, clipboard, nativeTheme } = require("electron");
+const { app, BrowserWindow, Menu, ipcMain, dialog, clipboard, nativeTheme, webContents } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -193,11 +193,17 @@ ipcMain.on("pane:set-pinned", (_e, leafId, isPinned) => {
   if (isPinned) pinned.add(leafId); else pinned.delete(leafId);
 });
 
-// Pane snapshot — renderer captures via webview.capturePage() and ships us a PNG
-// buffer; we save it to ~/Downloads and tell the renderer where it ended up.
-ipcMain.handle("pane:snapshot", async (_e, leafId, name, pngBytes) => {
+// Pane snapshot. We do the capture in MAIN (not the renderer) because
+// webview.capturePage() in the host renderer has hit a V8/GPU fatal on macOS
+// (Empty MaybeLocal → render frame disposed). The renderer just hands us the
+// guest webContents id; main captures + writes the PNG.
+ipcMain.handle("pane:snapshot", async (_e, leafId, name, wcId) => {
   try {
-    const buf = Buffer.from(pngBytes);
+    const wc = typeof wcId === "number" ? webContents.fromId(wcId) : null;
+    if (!wc || wc.isDestroyed()) return { error: "webContents not available" };
+    const img = await wc.capturePage();
+    const buf = img && img.toPNG ? img.toPNG() : null;
+    if (!buf || !buf.length) return { error: "empty capture" };
     const dir = app.getPath("downloads");
     const safe = String(name || ("pane-" + leafId)).replace(/[^a-z0-9_-]+/gi, "-").slice(0, 60) || ("pane-" + leafId);
     const ts = new Date().toISOString().replace(/[:.]/g, "-").replace(/-\d{3}Z$/, "Z");

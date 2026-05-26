@@ -25,8 +25,9 @@ contextBridge.exposeInMainWorld("api", {
   // Pin / unpin a pane (skip auto-close-stale + close-on-disconnect).
   setPinned: (leafId, isPinned) => ipcRenderer.send("pane:set-pinned", leafId, !!isPinned),
 
-  // Snapshot a pane to ~/Downloads. Renderer ships the PNG bytes (Uint8Array).
-  snapshotPane: (leafId, name, pngBytes) => ipcRenderer.invoke("pane:snapshot", leafId, name, pngBytes),
+  // Snapshot a pane to ~/Downloads. Renderer ships the webview's webContents id
+  // and main does the capturePage (avoids a V8/GPU fatal on the renderer side).
+  snapshotPane: (leafId, name, wcId) => ipcRenderer.invoke("pane:snapshot", leafId, name, wcId),
 
   // Proxy activity bumps (one event per pane, throttled in the proxy).
   onProxyActivity: (cb) => ipcRenderer.on("proxy:activity", (_e, d) => cb(d.leafId)),

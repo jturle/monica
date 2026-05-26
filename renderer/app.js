@@ -420,13 +420,10 @@ function togglePinned(paneId) {
 }
 
 async function snapshotPaneEl(p, wv) {
-  if (!wv?.capturePage) return;
+  if (!wv?.getWebContentsId) return;
   try {
-    const img = await wv.capturePage();
-    const png = img.toPNG ? img.toPNG() : null;
-    if (!png) { dlog("snap", "no toPNG on capture result"); return; }
-    const bytes = new Uint8Array(png);
-    const res = await window.api?.snapshotPane?.(p.id, p.name, bytes);
+    const wcId = wv.getWebContentsId();
+    const res = await window.api?.snapshotPane?.(p.id, p.name, wcId);
     dlog("snap", "pane=" + p.id + " " + (res?.file || res?.error || ""));
   } catch (e) { dlog("snap", "error " + (e?.message || e)); }
 }
