@@ -31,6 +31,9 @@ let logFn = () => {};
 let connSeq = 0;
 const hostCounters = new Map(); // host -> count
 const targetToPane = new Map(); // CDP targetId -> { connectionId, leafId, scopeKey, lastActivity }
+// targetId -> Set<sessionId> attached to it (via flatten auto-attach). Used to
+// synthesize Target.detachedFromTarget events when we fake a close (pinned pane).
+const sessionsByTarget = new Map();
 let createChain = Promise.resolve(); // serialize createTarget handling for clean correlation
 
 // Runtime-tunable behaviour driven by monica-settings.json (main pushes via setSettings).
@@ -150,9 +153,20 @@ function visibleTo(ctx, t) {
   return ownerScope(t && t.targetId) === ctx.scopeKey;
 }
 function filterBackendToClient(ctx, text) {
-  if (!(text.includes("targetInfo") || text.includes("targetInfos"))) return text;
+  // Fast-path: only parse messages that could carry the fields we care about.
+  if (!(text.includes("targetInfo") || text.includes("targetInfos") ||
+        text.includes("attachedToTarget") || text.includes("detachedFromTarget"))) return text;
   let msg;
   try { msg = JSON.parse(text); } catch { return text; }
+  // Track which sessions are attached to which targets (flatten auto-attach), so
+  // we can emit clean detach events when faking a close for a pinned pane.
+  if (msg.method === "Target.attachedToTarget" && msg.params?.sessionId && msg.params?.targetInfo?.targetId) {
+    const tid = msg.params.targetInfo.targetId;
+    if (!sessionsByTarget.has(tid)) sessionsByTarget.set(tid, new Set());
+    sessionsByTarget.get(tid).add(msg.params.sessionId);
+  } else if (msg.method === "Target.detachedFromTarget" && msg.params?.sessionId && msg.params?.targetId) {
+    sessionsByTarget.get(msg.params.targetId)?.delete(msg.params.sessionId);
+  }
   if ((msg.method === "Target.targetCreated" || msg.method === "Target.targetInfoChanged") &&
       msg.params && !visibleTo(ctx, msg.params.targetInfo)) {
     return null;
@@ -367,12 +381,19 @@ function handleClientMessage(ctx, data) {
       if (hooks.isPinned?.(e.leafId)) {
         targetToPane.delete(tid);
         logFn("proxy", "closeTarget", tid, "-> skipped (pinned) leaf=" + e.leafId);
-        // Ack the close to the client. Playwright/Puppeteer then wait for the
-        // matching Target.targetDestroyed event before resolving page.close();
-        // since we're NOT actually destroying the target, synthesize the event
-        // so the client moves on cleanly.
-        reply(ctx.client, { id: msg.id, result: { success: true } });
+        // We're not actually destroying the target — synthesize the full
+        // close-time sequence Chromium would normally emit, so Playwright's
+        // page.close() resolves: detach every attached session first, then
+        // targetDestroyed, then ack the command.
+        const sids = sessionsByTarget.get(tid);
+        if (sids) {
+          for (const sid of sids) {
+            reply(ctx.client, { method: "Target.detachedFromTarget", params: { sessionId: sid, targetId: tid } });
+          }
+          sessionsByTarget.delete(tid);
+        }
         reply(ctx.client, { method: "Target.targetDestroyed", params: { targetId: tid } });
+        reply(ctx.client, { id: msg.id, result: { success: true } });
         return;
       }
       targetToPane.delete(tid);
