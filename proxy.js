@@ -360,10 +360,19 @@ function handleClientMessage(ctx, data) {
   if (msg.method === "Target.closeTarget") {
     const tid = msg.params && msg.params.targetId;
     if (tid && targetToPane.has(tid)) {
-      const { leafId } = targetToPane.get(tid);
+      const e = targetToPane.get(tid);
+      // Pin = "user-protected": ack the close to the client so it moves on, and
+      // de-scope the target so the agent's next getTargets won't see it — but
+      // keep the pane alive in monica.
+      if (hooks.isPinned?.(e.leafId)) {
+        targetToPane.delete(tid);
+        logFn("proxy", "closeTarget", tid, "-> skipped (pinned) leaf=" + e.leafId);
+        reply(ctx.client, { id: msg.id, result: { success: true } });
+        return;
+      }
       targetToPane.delete(tid);
-      logFn("proxy", "closeTarget", tid, "-> close pane leaf=" + leafId);
-      Promise.resolve(hooks.closePane?.(leafId)).finally(() => reply(ctx.client, { id: msg.id, result: { success: true } }));
+      logFn("proxy", "closeTarget", tid, "-> close pane leaf=" + e.leafId);
+      Promise.resolve(hooks.closePane?.(e.leafId)).finally(() => reply(ctx.client, { id: msg.id, result: { success: true } }));
       return;
     }
   }

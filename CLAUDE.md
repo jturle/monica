@@ -44,7 +44,7 @@ External agents ── ws ──> :9222 (proxy.js)        ┐
 **`main.js`** is the Electron host. Responsibilities:
 - Settings file at `app.getPath("userData")/monica-settings.json`. **`app.setName("monica")` MUST run before any `getPath()` call** so userData lands under `…/monica`.
 - IPCs: `cdp:get/set`, `view:get/set`, `theme:get/set` (specific), and the generic `settings:get`/`settings:patch` (for the new toggles — see below). Proxy-affecting fields are forwarded live via `proxy.setSettings`.
-- `pane:set-pinned` mirrors a `pinned` Set used by the proxy's `isPinned` hook; pinned panes skip auto-close-stale and close-on-disconnect.
+- `pane:set-pinned` mirrors a `pinned` Set used by the proxy's `isPinned` hook. Pinned panes are user-protected: they skip auto-close-stale, skip close-on-disconnect, **and** ack an explicit `Target.closeTarget` with `success` while keeping the pane alive in monica (the target is also de-scoped so the agent's next `getTargets` won't see it).
 - `pane:snapshot` (handle) receives PNG bytes from the renderer (`webview.capturePage().toPNG()`) and writes them to `~/Downloads/monica-<name>-<ts>.png`.
 - 30s `setInterval` calls `proxy.sweepStale(cutoff, isPinned)` when `autoCloseStaleMinutes > 0`.
 - All host renderer sends go through `safeSend(channel, payload)` (checks `isDestroyed()` and try/catches `Render frame was disposed`). Don't call `mainWindow.webContents.send` directly — the activity stream hits the disposed-frame window easily.
