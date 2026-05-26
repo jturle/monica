@@ -172,7 +172,10 @@ function filterBackendToClient(ctx, text) {
 
 async function handleHttp(req, res) {
   const host = req.headers.host || bindAddr + ":" + PUBLIC_PORT;
-  const path = (req.url || "/").split("?")[0];
+  // Strip a trailing slash so clients that append it (Playwright's connectOverCDP
+  // requests /json/version/) still hit the right route.
+  let path = (req.url || "/").split("?")[0];
+  if (path.length > 1 && path.endsWith("/")) path = path.slice(0, -1);
   logFn("http", req.method, path);
   try {
     if (path === "/json/version") {
