@@ -367,7 +367,12 @@ function handleClientMessage(ctx, data) {
       if (hooks.isPinned?.(e.leafId)) {
         targetToPane.delete(tid);
         logFn("proxy", "closeTarget", tid, "-> skipped (pinned) leaf=" + e.leafId);
+        // Ack the close to the client. Playwright/Puppeteer then wait for the
+        // matching Target.targetDestroyed event before resolving page.close();
+        // since we're NOT actually destroying the target, synthesize the event
+        // so the client moves on cleanly.
         reply(ctx.client, { id: msg.id, result: { success: true } });
+        reply(ctx.client, { method: "Target.targetDestroyed", params: { targetId: tid } });
         return;
       }
       targetToPane.delete(tid);
