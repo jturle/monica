@@ -113,23 +113,31 @@ function createPaneInRenderer(connectionId, url) {
   return new Promise((resolve) => {
     const reqId = ++reqSeq;
     createResolvers.set(reqId, resolve);
-    mainWindow?.webContents.send("proxy:create-pane", { connectionId, url, reqId });
+    safeSend("proxy:create-pane", { connectionId, url, reqId });
     setTimeout(() => {
       if (createResolvers.has(reqId)) { createResolvers.delete(reqId); resolve(null); }
     }, 10000);
   });
 }
 
+// Safe send to the host renderer. The renderer's frame can be transiently absent
+// (mid-reload, window closing, guest crash propagation) while webContents itself
+// is still truthy — direct .send() then throws "Render frame was disposed before
+// WebFrameMain could be accessed". With high-frequency proxy:activity events that
+// gap is hit easily, so every host send goes through here.
+function safeSend(channel, payload) {
+  const wc = mainWindow?.webContents;
+  if (!wc || wc.isDestroyed()) return;
+  try { wc.send(channel, payload); } catch {}
+}
+
 const proxyHooks = {
-  onConnectionOpen: (connectionId, label) =>
-    mainWindow?.webContents.send("proxy:connection-open", { connectionId, label }),
-  onConnectionLabel: (connectionId, label) =>
-    mainWindow?.webContents.send("proxy:connection-label", { connectionId, label }),
-  onConnectionClose: (connectionId) =>
-    mainWindow?.webContents.send("proxy:connection-close", { connectionId }),
+  onConnectionOpen: (connectionId, label) => safeSend("proxy:connection-open", { connectionId, label }),
+  onConnectionLabel: (connectionId, label) => safeSend("proxy:connection-label", { connectionId, label }),
+  onConnectionClose: (connectionId) => safeSend("proxy:connection-close", { connectionId }),
   createPane: async (connectionId, url) => ({ leafId: await createPaneInRenderer(connectionId, url) }),
-  closePane: (leafId) => mainWindow?.webContents.send("proxy:close-pane", { leafId }),
-  onActivity: (leafId) => mainWindow?.webContents.send("proxy:activity", { leafId }),
+  closePane: (leafId) => safeSend("proxy:close-pane", { leafId }),
+  onActivity: (leafId) => safeSend("proxy:activity", { leafId }),
   isPinned: (leafId) => pinned.has(leafId),
 };
 
