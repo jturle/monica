@@ -279,11 +279,8 @@ body { display: flex; flex-direction: column; }
 }
 
 .pane-chrome .pname { color: var(--accent); white-space: nowrap; flex: 0 0 auto; font-weight: 600; }
-/* Title sizes to its content (with ellipsis when overflowing). The spacer below
-   absorbs the slack, keeping the age timer tight to the title and pushing the
-   right-side cluster (pill + buttons) to the edge. */
-.pane-chrome .ptitle { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
-.pane-chrome .pchrome-spacer { flex: 1 1 auto; min-width: 0; }
+/* Title fills the slack, pushing the age + right-side cluster against the edge. */
+.pane-chrome .ptitle { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1 1 auto; min-width: 0; }
 
 /* Last-interacted-via-CDP timer */
 .pane-chrome .page {
@@ -305,28 +302,26 @@ body { display: flex; flex-direction: column; }
   flex: 0 0 auto;
 }
 
-/* Pin and snapshot icon buttons in the chrome — hover-revealed like .pclose */
+/* Pin and snapshot icon buttons in the chrome — always visible */
 .pane-chrome .pchrome-btn {
   border: none; background: transparent; color: var(--muted);
   cursor: pointer; padding: 0 4px; line-height: 0;
-  flex: 0 0 auto; opacity: 0;
+  flex: 0 0 auto;
 }
 .pane-chrome .pchrome-btn .ico { width: 13px; height: 13px; display: block; }
-.pane-chrome:hover .pchrome-btn { opacity: 1; }
 .pane-chrome .pchrome-btn:hover { color: var(--text); }
-/* Brief confirmation flash (e.g. snapshot saved): force-visible + success color */
-.pane-chrome .pchrome-btn.ok { opacity: 1; color: var(--success); }
+/* Brief confirmation flash (e.g. snapshot saved) */
+.pane-chrome .pchrome-btn.ok { color: var(--success); }
 .pane-chrome .pchrome-btn.ok:hover { color: var(--success); }
 
-/* Pinned: the pin button stays visible and accents */
-.pane.pinned .pane-chrome .ppin { opacity: 1; color: var(--accent); }
+/* Pinned: the pin button shows the brand accent */
+.pane.pinned .pane-chrome .ppin { color: var(--accent); }
 
 .pane-chrome .pclose {
   border: none; background: transparent; color: var(--muted);
   cursor: pointer; font-size: 15px; line-height: 1; padding: 0 4px;
-  flex: 0 0 auto; opacity: 0;
+  flex: 0 0 auto;
 }
-.pane-chrome:hover .pclose { opacity: 1; }
 .pane-chrome .pclose:hover { color: var(--danger); }
 
 .pane webview { flex: 1; width: 100%; border: 0; background: #fff; }

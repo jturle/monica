@@ -118,9 +118,8 @@ function createPaneEl(p) {
     '<span class="dot"></span>' +
     '<span class="pname"></span>' +
     '<span class="ptitle"></span>' +
-    '<span class="page"></span>' +
-    '<span class="pchrome-spacer"></span>' +
     '<span class="ppill" hidden>you</span>' +
+    '<span class="page"></span>' +
     '<button class="pchrome-btn ppin" title="Pin pane (skip auto-close)">' + ICON_PIN + '</button>' +
     '<button class="pchrome-btn psnap" title="Snapshot pane to ~/Downloads">' + ICON_SNAP + '</button>' +
     '<button class="pclose" title="Close pane">×</button>';
