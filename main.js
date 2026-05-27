@@ -136,20 +136,23 @@ ipcMain.on("pane:unregister-wc", (_e, leafId) => {
 
 // CDP Page.printToPDF params → Electron webContents.printToPDF options.
 //
-// Only two defaults are forced (the user-visible behaviours we want to align
-// with Chrome's "Save as PDF" UI):
+// Two values are FORCED regardless of what the caller asks for, to match
+// Chrome's "Save as PDF" UI defaults (the agent-browser CLI defaults its `pdf`
+// command to printBackground=true, which would otherwise leak background fills):
 //
-//   displayHeaderFooter: false   (no auto-added header/footer strip)
+//   displayHeaderFooter: false   (no auto-added URL/title/page-N strip)
 //   printBackground: false       (no CSS background colours/images)
 //
 // Everything else is forwarded only when the caller provides it. Defaulting
-// pageSize / margins / pageRanges ourselves was tripping Electron 42's print
-// engine with a generic "Failed to generate PDF: Printing failed".
+// pageSize / margins / pageRanges ourselves tripped Electron 42's print engine
+// with a generic "Failed to generate PDF: Printing failed". If a future use
+// case needs backgrounds in the PDF, we'll expose a setting; right now the
+// behaviour is deterministic.
 function cdpToElectronPDFOptions(p) {
   p = p && typeof p === "object" ? p : {};
   const o = {
-    displayHeaderFooter: typeof p.displayHeaderFooter === "boolean" ? p.displayHeaderFooter : false,
-    printBackground: typeof p.printBackground === "boolean" ? p.printBackground : false,
+    displayHeaderFooter: false,
+    printBackground: false,
   };
   if (typeof p.landscape === "boolean") o.landscape = p.landscape;
   if (typeof p.scale === "number") o.scale = p.scale;
