@@ -546,28 +546,37 @@ window.api?.onProxyClosePane?.((leafId) => closePane(leafId));
 // Page.printToPDF — proxy routed it here because Chromium gates the CDP command
 // to --headless. Electron's <webview>.printToPDF works fine; translate the CDP
 // options to Electron's shape and ship the bytes back as base64.
+// Translate CDP Page.printToPDF params → Electron webContents.printToPDF options,
+// applying CDP's documented defaults (which match Chrome's "Save as PDF" UI) for
+// any field the caller didn't specify. Without these explicit defaults, the call
+// falls through to Electron's defaults which subtly differ — e.g. background
+// colours can leak into the PDF and the page can pick up a default header/footer.
 function cdpToElectronPDFOptions(p) {
-  if (!p || typeof p !== "object") return {};
-  const o = {};
-  if (typeof p.landscape === "boolean") o.landscape = p.landscape;
-  if (typeof p.displayHeaderFooter === "boolean") o.displayHeaderFooter = p.displayHeaderFooter;
-  if (typeof p.printBackground === "boolean") o.printBackground = p.printBackground;
-  if (typeof p.scale === "number") o.scale = p.scale;
+  p = p && typeof p === "object" ? p : {};
+  const num = (v, d) => (Number.isFinite(v) ? v : d);
+  const bool = (v, d) => (typeof v === "boolean" ? v : d);
+  const o = {
+    landscape: bool(p.landscape, false),
+    displayHeaderFooter: bool(p.displayHeaderFooter, false), // no auto header/footer
+    printBackground: bool(p.printBackground, false),         // no background fills/images
+    scale: num(p.scale, 1),
+    preferCSSPageSize: bool(p.preferCSSPageSize, false),
+    pageRanges: typeof p.pageRanges === "string" ? p.pageRanges : "",
+    pageSize: {
+      // CDP is inches; Electron's pageSize object is microns (1in = 25400µm).
+      width: Math.round(num(p.paperWidth, 8.5) * 25400),
+      height: Math.round(num(p.paperHeight, 11) * 25400),
+    },
+    // Both CDP and Electron express margins in inches. CDP default is 0.4" all sides.
+    margins: {
+      top: num(p.marginTop, 0.4),
+      bottom: num(p.marginBottom, 0.4),
+      left: num(p.marginLeft, 0.4),
+      right: num(p.marginRight, 0.4),
+    },
+  };
   if (typeof p.headerTemplate === "string") o.headerTemplate = p.headerTemplate;
   if (typeof p.footerTemplate === "string") o.footerTemplate = p.footerTemplate;
-  if (typeof p.preferCSSPageSize === "boolean") o.preferCSSPageSize = p.preferCSSPageSize;
-  if (typeof p.pageRanges === "string") o.pageRanges = p.pageRanges;
-  // CDP gives inches; Electron's pageSize object is microns (1in = 25400µm).
-  if (Number.isFinite(p.paperWidth) && Number.isFinite(p.paperHeight)) {
-    o.pageSize = { width: Math.round(p.paperWidth * 25400), height: Math.round(p.paperHeight * 25400) };
-  }
-  // CDP and Electron both express margins in inches.
-  const m = {};
-  if (Number.isFinite(p.marginTop)) m.top = p.marginTop;
-  if (Number.isFinite(p.marginBottom)) m.bottom = p.marginBottom;
-  if (Number.isFinite(p.marginLeft)) m.left = p.marginLeft;
-  if (Number.isFinite(p.marginRight)) m.right = p.marginRight;
-  if (Object.keys(m).length) o.margins = m;
   return o;
 }
 function bytesToBase64(u8) {
