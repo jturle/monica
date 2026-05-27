@@ -134,35 +134,39 @@ ipcMain.on("pane:unregister-wc", (_e, leafId) => {
   if (paneWcIds.delete(leafId)) log("pane", "wc-unregister leaf=" + leafId);
 });
 
-// CDP Page.printToPDF params → Electron webContents.printToPDF options, with
-// CDP's documented defaults (= Chrome's "Save as PDF" UI defaults) for anything
-// the caller didn't specify. Without them, Electron's own defaults can leak
-// background colours and auto-add headers/footers.
+// CDP Page.printToPDF params → Electron webContents.printToPDF options.
+//
+// Only two defaults are forced (the user-visible behaviours we want to align
+// with Chrome's "Save as PDF" UI):
+//
+//   displayHeaderFooter: false   (no auto-added header/footer strip)
+//   printBackground: false       (no CSS background colours/images)
+//
+// Everything else is forwarded only when the caller provides it. Defaulting
+// pageSize / margins / pageRanges ourselves was tripping Electron 42's print
+// engine with a generic "Failed to generate PDF: Printing failed".
 function cdpToElectronPDFOptions(p) {
   p = p && typeof p === "object" ? p : {};
-  const num = (v, d) => (Number.isFinite(v) ? v : d);
-  const bool = (v, d) => (typeof v === "boolean" ? v : d);
   const o = {
-    landscape: bool(p.landscape, false),
-    displayHeaderFooter: bool(p.displayHeaderFooter, false),
-    printBackground: bool(p.printBackground, false),
-    scale: num(p.scale, 1),
-    preferCSSPageSize: bool(p.preferCSSPageSize, false),
-    pageRanges: typeof p.pageRanges === "string" ? p.pageRanges : "",
-    pageSize: {
-      // CDP is inches; Electron pageSize is microns (1in = 25400µm).
-      width: Math.round(num(p.paperWidth, 8.5) * 25400),
-      height: Math.round(num(p.paperHeight, 11) * 25400),
-    },
-    margins: {
-      top: num(p.marginTop, 0.4),
-      bottom: num(p.marginBottom, 0.4),
-      left: num(p.marginLeft, 0.4),
-      right: num(p.marginRight, 0.4),
-    },
+    displayHeaderFooter: typeof p.displayHeaderFooter === "boolean" ? p.displayHeaderFooter : false,
+    printBackground: typeof p.printBackground === "boolean" ? p.printBackground : false,
   };
+  if (typeof p.landscape === "boolean") o.landscape = p.landscape;
+  if (typeof p.scale === "number") o.scale = p.scale;
+  if (typeof p.preferCSSPageSize === "boolean") o.preferCSSPageSize = p.preferCSSPageSize;
+  if (typeof p.pageRanges === "string" && p.pageRanges) o.pageRanges = p.pageRanges;
   if (typeof p.headerTemplate === "string") o.headerTemplate = p.headerTemplate;
   if (typeof p.footerTemplate === "string") o.footerTemplate = p.footerTemplate;
+  if (Number.isFinite(p.paperWidth) && Number.isFinite(p.paperHeight)) {
+    // CDP is inches; Electron pageSize is microns (1in = 25400µm).
+    o.pageSize = { width: Math.round(p.paperWidth * 25400), height: Math.round(p.paperHeight * 25400) };
+  }
+  const m = {};
+  if (Number.isFinite(p.marginTop)) m.top = p.marginTop;
+  if (Number.isFinite(p.marginBottom)) m.bottom = p.marginBottom;
+  if (Number.isFinite(p.marginLeft)) m.left = p.marginLeft;
+  if (Number.isFinite(p.marginRight)) m.right = p.marginRight;
+  if (Object.keys(m).length) o.margins = m;
   return o;
 }
 
@@ -187,12 +191,13 @@ const proxyHooks = {
   isPinned: (leafId) => pinned.has(leafId),
   printToPDF: async (leafId, options) => {
     const wcId = paneWcIds.get(leafId);
-    log("pdf", "begin leaf=" + leafId + " wc=" + (wcId == null ? "?" : wcId));
+    const opts = cdpToElectronPDFOptions(options);
+    log("pdf", "begin leaf=" + leafId + " wc=" + (wcId == null ? "?" : wcId) + " opts=" + JSON.stringify(opts));
     if (!wcId) throw new Error("pane has no registered webContents");
     const wc = webContents.fromId(wcId);
     if (!wc || wc.isDestroyed()) throw new Error("pane webContents gone");
     try {
-      const buf = await wc.printToPDF(cdpToElectronPDFOptions(options));
+      const buf = await wc.printToPDF(opts);
       log("pdf", "done leaf=" + leafId + " " + buf.length + " bytes");
       return buf.toString("base64");
     } catch (e) {
