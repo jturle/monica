@@ -168,10 +168,18 @@ function createPaneEl(p) {
 
   // Hand main the guest's webContents id once it's attached — main uses it for
   // webContents-level APIs (Page.printToPDF) that fail when called through the
-  // renderer-side <webview> bridge on a non-visible pane.
-  wv.addEventListener("did-attach", () => {
-    try { window.api?.registerPaneWc?.(p.id, wv.getWebContentsId()); } catch {}
-  });
+  // renderer-side <webview> bridge on a non-visible pane. Belt-and-suspenders:
+  // register on three events because any single one can be missed depending on
+  // when the guest fully attaches.
+  const registerWc = () => {
+    try {
+      const wcId = wv.getWebContentsId && wv.getWebContentsId();
+      if (wcId) window.api?.registerPaneWc?.(p.id, wcId);
+    } catch {}
+  };
+  wv.addEventListener("did-attach", registerWc);
+  wv.addEventListener("dom-ready", registerWc);
+  wv.addEventListener("did-navigate", registerWc);
 
   // Reflect the initial pinned state if this pane is being re-created somehow.
   if (pinnedPanes.has(p.id)) el.classList.add("pinned");

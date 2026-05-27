@@ -418,8 +418,14 @@ function handleClientMessage(ctx, data) {
       logFn("proxy", "printToPDF leaf=" + e.leafId);
       Promise.resolve()
         .then(() => hooks.printToPDF(e.leafId, msg.params || {}))
-        .then((data) => reply(ctx.client, { id: msg.id, sessionId: sid, result: { data } }))
-        .catch((err) => reply(ctx.client, { id: msg.id, sessionId: sid, error: { code: -32000, message: String(err?.message || err) } }));
+        .then((data) => {
+          logFn("proxy", "printToPDF reply leaf=" + e.leafId + " " + (data ? data.length : 0) + " base64-chars");
+          reply(ctx.client, { id: msg.id, sessionId: sid, result: { data } });
+        })
+        .catch((err) => {
+          logFn("proxy", "printToPDF error leaf=" + e.leafId + " " + String(err?.message || err));
+          reply(ctx.client, { id: msg.id, sessionId: sid, error: { code: -32000, message: String(err?.message || err) } });
+        });
       return;
     }
     // No mapping (browser-level call?) — let Chromium try, even though it'll fail

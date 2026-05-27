@@ -125,8 +125,14 @@ function createPaneInRenderer(connectionId, url) {
 // the <webview>.printToPDF path in the renderer fails ("GUEST_VIEW_MANAGER_CALL
 // … Printing failed") when the pane isn't currently visible.
 const paneWcIds = new Map();
-ipcMain.on("pane:register-wc", (_e, leafId, wcId) => { paneWcIds.set(leafId, wcId); });
-ipcMain.on("pane:unregister-wc", (_e, leafId) => { paneWcIds.delete(leafId); });
+ipcMain.on("pane:register-wc", (_e, leafId, wcId) => {
+  const prev = paneWcIds.get(leafId);
+  paneWcIds.set(leafId, wcId);
+  if (prev !== wcId) log("pane", "wc-register leaf=" + leafId + " wc=" + wcId);
+});
+ipcMain.on("pane:unregister-wc", (_e, leafId) => {
+  if (paneWcIds.delete(leafId)) log("pane", "wc-unregister leaf=" + leafId);
+});
 
 // CDP Page.printToPDF params → Electron webContents.printToPDF options, with
 // CDP's documented defaults (= Chrome's "Save as PDF" UI defaults) for anything
@@ -181,12 +187,18 @@ const proxyHooks = {
   isPinned: (leafId) => pinned.has(leafId),
   printToPDF: async (leafId, options) => {
     const wcId = paneWcIds.get(leafId);
+    log("pdf", "begin leaf=" + leafId + " wc=" + (wcId == null ? "?" : wcId));
     if (!wcId) throw new Error("pane has no registered webContents");
     const wc = webContents.fromId(wcId);
     if (!wc || wc.isDestroyed()) throw new Error("pane webContents gone");
-    const buf = await wc.printToPDF(cdpToElectronPDFOptions(options));
-    log("pdf", "pane=" + leafId + " " + buf.length + " bytes");
-    return buf.toString("base64");
+    try {
+      const buf = await wc.printToPDF(cdpToElectronPDFOptions(options));
+      log("pdf", "done leaf=" + leafId + " " + buf.length + " bytes");
+      return buf.toString("base64");
+    } catch (e) {
+      log("pdf", "fail leaf=" + leafId + " " + String(e?.message || e));
+      throw e;
+    }
   },
 };
 
