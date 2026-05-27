@@ -120,24 +120,44 @@ function createPaneInRenderer(connectionId, url) {
   });
 }
 
-// PDF round-trip: proxy intercepts Page.printToPDF → main asks the renderer to
-// run wv.printToPDF() (which works in Electron even though the CDP command is
-// gated by Chromium to headless) and ship back base64.
-let printReqSeq = 0;
-const printResolvers = new Map();
-ipcMain.on("proxy:print-to-pdf-result", (_e, { reqId, base64, error }) => {
-  const r = printResolvers.get(reqId);
-  if (r) { printResolvers.delete(reqId); r({ base64, error }); }
-});
-function printPaneInRenderer(leafId, options) {
-  return new Promise((resolve) => {
-    const reqId = ++printReqSeq;
-    printResolvers.set(reqId, resolve);
-    safeSend("proxy:print-to-pdf", { reqId, leafId, options });
-    setTimeout(() => {
-      if (printResolvers.has(reqId)) { printResolvers.delete(reqId); resolve({ error: "timeout" }); }
-    }, 30000);
-  });
+// Pane webContents registry. Renderer tells us each pane's guest webContents id
+// on attach, so main can drive webContents-level APIs (printToPDF) directly —
+// the <webview>.printToPDF path in the renderer fails ("GUEST_VIEW_MANAGER_CALL
+// … Printing failed") when the pane isn't currently visible.
+const paneWcIds = new Map();
+ipcMain.on("pane:register-wc", (_e, leafId, wcId) => { paneWcIds.set(leafId, wcId); });
+ipcMain.on("pane:unregister-wc", (_e, leafId) => { paneWcIds.delete(leafId); });
+
+// CDP Page.printToPDF params → Electron webContents.printToPDF options, with
+// CDP's documented defaults (= Chrome's "Save as PDF" UI defaults) for anything
+// the caller didn't specify. Without them, Electron's own defaults can leak
+// background colours and auto-add headers/footers.
+function cdpToElectronPDFOptions(p) {
+  p = p && typeof p === "object" ? p : {};
+  const num = (v, d) => (Number.isFinite(v) ? v : d);
+  const bool = (v, d) => (typeof v === "boolean" ? v : d);
+  const o = {
+    landscape: bool(p.landscape, false),
+    displayHeaderFooter: bool(p.displayHeaderFooter, false),
+    printBackground: bool(p.printBackground, false),
+    scale: num(p.scale, 1),
+    preferCSSPageSize: bool(p.preferCSSPageSize, false),
+    pageRanges: typeof p.pageRanges === "string" ? p.pageRanges : "",
+    pageSize: {
+      // CDP is inches; Electron pageSize is microns (1in = 25400µm).
+      width: Math.round(num(p.paperWidth, 8.5) * 25400),
+      height: Math.round(num(p.paperHeight, 11) * 25400),
+    },
+    margins: {
+      top: num(p.marginTop, 0.4),
+      bottom: num(p.marginBottom, 0.4),
+      left: num(p.marginLeft, 0.4),
+      right: num(p.marginRight, 0.4),
+    },
+  };
+  if (typeof p.headerTemplate === "string") o.headerTemplate = p.headerTemplate;
+  if (typeof p.footerTemplate === "string") o.footerTemplate = p.footerTemplate;
+  return o;
 }
 
 // Safe send to the host renderer. The renderer's frame can be transiently absent
@@ -160,9 +180,13 @@ const proxyHooks = {
   onActivity: (leafId) => safeSend("proxy:activity", { leafId }),
   isPinned: (leafId) => pinned.has(leafId),
   printToPDF: async (leafId, options) => {
-    const { base64, error } = await printPaneInRenderer(leafId, options);
-    if (error) throw new Error(error);
-    return base64;
+    const wcId = paneWcIds.get(leafId);
+    if (!wcId) throw new Error("pane has no registered webContents");
+    const wc = webContents.fromId(wcId);
+    if (!wc || wc.isDestroyed()) throw new Error("pane webContents gone");
+    const buf = await wc.printToPDF(cdpToElectronPDFOptions(options));
+    log("pdf", "pane=" + leafId + " " + buf.length + " bytes");
+    return buf.toString("base64");
   },
 };
 

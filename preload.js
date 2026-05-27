@@ -32,10 +32,11 @@ contextBridge.exposeInMainWorld("api", {
   // Proxy activity bumps (one event per pane, throttled in the proxy).
   onProxyActivity: (cb) => ipcRenderer.on("proxy:activity", (_e, d) => cb(d.leafId)),
 
-  // Page.printToPDF round-trip — main asks the renderer to run printToPDF on a
-  // specific pane's webview; renderer ships the result back via reply.
-  onProxyPrintToPDF: (cb) => ipcRenderer.on("proxy:print-to-pdf", (_e, d) => cb(d)),
-  replyPrintToPDF: (reqId, base64, error) => ipcRenderer.send("proxy:print-to-pdf-result", { reqId, base64, error }),
+  // Register/unregister a pane's guest webContents id with main, so main can
+  // drive webContents APIs (printToPDF) directly — bypasses the renderer-side
+  // <webview> bridge that fails when the pane isn't visible.
+  registerPaneWc: (leafId, wcId) => ipcRenderer.send("pane:register-wc", leafId, wcId),
+  unregisterPaneWc: (leafId) => ipcRenderer.send("pane:unregister-wc", leafId),
   copy: (text) => ipcRenderer.send("clipboard:write", text), // clipboard isn't available in a sandboxed preload
   confirmQuit: () => ipcRenderer.send("app:confirm-quit"),
   log: (scope, msg) => ipcRenderer.send("monica:log", scope, msg),

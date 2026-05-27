@@ -166,6 +166,13 @@ function createPaneEl(p) {
   wv.addEventListener("did-navigate", (e) => setUrl(e.url));
   wv.addEventListener("did-navigate-in-page", (e) => setUrl(e.url));
 
+  // Hand main the guest's webContents id once it's attached — main uses it for
+  // webContents-level APIs (Page.printToPDF) that fail when called through the
+  // renderer-side <webview> bridge on a non-visible pane.
+  wv.addEventListener("did-attach", () => {
+    try { window.api?.registerPaneWc?.(p.id, wv.getWebContentsId()); } catch {}
+  });
+
   // Reflect the initial pinned state if this pane is being re-created somehow.
   if (pinnedPanes.has(p.id)) el.classList.add("pinned");
   lastActivity.set(p.id, Date.now());
@@ -280,6 +287,7 @@ function closePane(id) {
   const p = paneById(id);
   if (!p) return;
   dlog("pane", "close id=" + id + " name=" + p.name);
+  window.api?.unregisterPaneWc?.(id);
   const el = paneEls.get(id);
   if (el) { el.remove(); paneEls.delete(id); }
   const idx = panes.indexOf(p);
@@ -543,64 +551,6 @@ window.api?.onProxyCreatePane?.(({ connectionId, url, reqId }) => {
 
 window.api?.onProxyClosePane?.((leafId) => closePane(leafId));
 
-// Page.printToPDF — proxy routed it here because Chromium gates the CDP command
-// to --headless. Electron's <webview>.printToPDF works fine; translate the CDP
-// options to Electron's shape and ship the bytes back as base64.
-// Translate CDP Page.printToPDF params → Electron webContents.printToPDF options,
-// applying CDP's documented defaults (which match Chrome's "Save as PDF" UI) for
-// any field the caller didn't specify. Without these explicit defaults, the call
-// falls through to Electron's defaults which subtly differ — e.g. background
-// colours can leak into the PDF and the page can pick up a default header/footer.
-function cdpToElectronPDFOptions(p) {
-  p = p && typeof p === "object" ? p : {};
-  const num = (v, d) => (Number.isFinite(v) ? v : d);
-  const bool = (v, d) => (typeof v === "boolean" ? v : d);
-  const o = {
-    landscape: bool(p.landscape, false),
-    displayHeaderFooter: bool(p.displayHeaderFooter, false), // no auto header/footer
-    printBackground: bool(p.printBackground, false),         // no background fills/images
-    scale: num(p.scale, 1),
-    preferCSSPageSize: bool(p.preferCSSPageSize, false),
-    pageRanges: typeof p.pageRanges === "string" ? p.pageRanges : "",
-    pageSize: {
-      // CDP is inches; Electron's pageSize object is microns (1in = 25400µm).
-      width: Math.round(num(p.paperWidth, 8.5) * 25400),
-      height: Math.round(num(p.paperHeight, 11) * 25400),
-    },
-    // Both CDP and Electron express margins in inches. CDP default is 0.4" all sides.
-    margins: {
-      top: num(p.marginTop, 0.4),
-      bottom: num(p.marginBottom, 0.4),
-      left: num(p.marginLeft, 0.4),
-      right: num(p.marginRight, 0.4),
-    },
-  };
-  if (typeof p.headerTemplate === "string") o.headerTemplate = p.headerTemplate;
-  if (typeof p.footerTemplate === "string") o.footerTemplate = p.footerTemplate;
-  return o;
-}
-function bytesToBase64(u8) {
-  let bin = "";
-  for (let i = 0; i < u8.length; i += 0x8000) {
-    bin += String.fromCharCode.apply(null, u8.subarray(i, Math.min(i + 0x8000, u8.length)));
-  }
-  return btoa(bin);
-}
-window.api?.onProxyPrintToPDF?.(async ({ reqId, leafId, options }) => {
-  try {
-    const wv = paneEls.get(leafId)?.querySelector("webview");
-    if (!wv?.printToPDF) {
-      window.api.replyPrintToPDF(reqId, null, "webview.printToPDF unavailable");
-      return;
-    }
-    const data = await wv.printToPDF(cdpToElectronPDFOptions(options));
-    window.api.replyPrintToPDF(reqId, bytesToBase64(new Uint8Array(data)), null);
-    dlog("pdf", "pane=" + leafId + " " + data.length + " bytes");
-  } catch (e) {
-    window.api.replyPrintToPDF(reqId, null, String(e?.message || e));
-    dlog("pdf", "pane=" + leafId + " error " + (e?.message || e));
-  }
-});
 
 // Proxy fires this (throttled per-pane) every time a CDP message touches a pane.
 // Bump the timestamp + pulse the chrome dot.
