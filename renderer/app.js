@@ -543,6 +543,56 @@ window.api?.onProxyCreatePane?.(({ connectionId, url, reqId }) => {
 
 window.api?.onProxyClosePane?.((leafId) => closePane(leafId));
 
+// Page.printToPDF — proxy routed it here because Chromium gates the CDP command
+// to --headless. Electron's <webview>.printToPDF works fine; translate the CDP
+// options to Electron's shape and ship the bytes back as base64.
+function cdpToElectronPDFOptions(p) {
+  if (!p || typeof p !== "object") return {};
+  const o = {};
+  if (typeof p.landscape === "boolean") o.landscape = p.landscape;
+  if (typeof p.displayHeaderFooter === "boolean") o.displayHeaderFooter = p.displayHeaderFooter;
+  if (typeof p.printBackground === "boolean") o.printBackground = p.printBackground;
+  if (typeof p.scale === "number") o.scale = p.scale;
+  if (typeof p.headerTemplate === "string") o.headerTemplate = p.headerTemplate;
+  if (typeof p.footerTemplate === "string") o.footerTemplate = p.footerTemplate;
+  if (typeof p.preferCSSPageSize === "boolean") o.preferCSSPageSize = p.preferCSSPageSize;
+  if (typeof p.pageRanges === "string") o.pageRanges = p.pageRanges;
+  // CDP gives inches; Electron's pageSize object is microns (1in = 25400µm).
+  if (Number.isFinite(p.paperWidth) && Number.isFinite(p.paperHeight)) {
+    o.pageSize = { width: Math.round(p.paperWidth * 25400), height: Math.round(p.paperHeight * 25400) };
+  }
+  // CDP and Electron both express margins in inches.
+  const m = {};
+  if (Number.isFinite(p.marginTop)) m.top = p.marginTop;
+  if (Number.isFinite(p.marginBottom)) m.bottom = p.marginBottom;
+  if (Number.isFinite(p.marginLeft)) m.left = p.marginLeft;
+  if (Number.isFinite(p.marginRight)) m.right = p.marginRight;
+  if (Object.keys(m).length) o.margins = m;
+  return o;
+}
+function bytesToBase64(u8) {
+  let bin = "";
+  for (let i = 0; i < u8.length; i += 0x8000) {
+    bin += String.fromCharCode.apply(null, u8.subarray(i, Math.min(i + 0x8000, u8.length)));
+  }
+  return btoa(bin);
+}
+window.api?.onProxyPrintToPDF?.(async ({ reqId, leafId, options }) => {
+  try {
+    const wv = paneEls.get(leafId)?.querySelector("webview");
+    if (!wv?.printToPDF) {
+      window.api.replyPrintToPDF(reqId, null, "webview.printToPDF unavailable");
+      return;
+    }
+    const data = await wv.printToPDF(cdpToElectronPDFOptions(options));
+    window.api.replyPrintToPDF(reqId, bytesToBase64(new Uint8Array(data)), null);
+    dlog("pdf", "pane=" + leafId + " " + data.length + " bytes");
+  } catch (e) {
+    window.api.replyPrintToPDF(reqId, null, String(e?.message || e));
+    dlog("pdf", "pane=" + leafId + " error " + (e?.message || e));
+  }
+});
+
 // Proxy fires this (throttled per-pane) every time a CDP message touches a pane.
 // Bump the timestamp + pulse the chrome dot.
 window.api?.onProxyActivity?.((leafId) => {

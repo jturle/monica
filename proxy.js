@@ -34,6 +34,9 @@ const targetToPane = new Map(); // CDP targetId -> { connectionId, leafId, scope
 // targetId -> Set<sessionId> attached to it (via flatten auto-attach). Used to
 // synthesize Target.detachedFromTarget events when we fake a close (pinned pane).
 const sessionsByTarget = new Map();
+// Reverse lookup: sessionId -> targetId. Used to route Page.printToPDF (and any
+// future per-target hooks) from the wire sessionId back to a pane.
+const targetBySession = new Map();
 let createChain = Promise.resolve(); // serialize createTarget handling for clean correlation
 
 // Runtime-tunable behaviour driven by monica-settings.json (main pushes via setSettings).
@@ -164,8 +167,10 @@ function filterBackendToClient(ctx, text) {
     const tid = msg.params.targetInfo.targetId;
     if (!sessionsByTarget.has(tid)) sessionsByTarget.set(tid, new Set());
     sessionsByTarget.get(tid).add(msg.params.sessionId);
+    targetBySession.set(msg.params.sessionId, tid);
   } else if (msg.method === "Target.detachedFromTarget" && msg.params?.sessionId && msg.params?.targetId) {
     sessionsByTarget.get(msg.params.targetId)?.delete(msg.params.sessionId);
+    targetBySession.delete(msg.params.sessionId);
   }
   if ((msg.method === "Target.targetCreated" || msg.method === "Target.targetInfoChanged") &&
       msg.params && !visibleTo(ctx, msg.params.targetInfo)) {
@@ -402,6 +407,25 @@ function handleClientMessage(ctx, data) {
       return;
     }
   }
+  // Page.printToPDF: Chromium gates this to --headless mode, but Electron's
+  // <webview>.printToPDF works fine. Route through main to the right pane,
+  // generate locally, and reply with the same { data: <base64> } CDP would.
+  if (msg.method === "Page.printToPDF") {
+    const sid = msg.sessionId;
+    const tid = sid ? targetBySession.get(sid) : null;
+    const e = tid ? targetToPane.get(tid) : null;
+    if (e && hooks.printToPDF) {
+      logFn("proxy", "printToPDF leaf=" + e.leafId);
+      Promise.resolve()
+        .then(() => hooks.printToPDF(e.leafId, msg.params || {}))
+        .then((data) => reply(ctx.client, { id: msg.id, sessionId: sid, result: { data } }))
+        .catch((err) => reply(ctx.client, { id: msg.id, sessionId: sid, error: { code: -32000, message: String(err?.message || err) } }));
+      return;
+    }
+    // No mapping (browser-level call?) — let Chromium try, even though it'll fail
+    // with the usual "only supported in headless" message.
+  }
+
   // Slow-motion: delay user-facing commands by cfg.slowMo (puppeteer-style demo pacing).
   // We don't slow plumbing (Page.enable/Target.*/Network.enable …) so attach doesn't desync.
   if (cfg.slowMo > 0 && msg.method && SLOW_METHODS.has(msg.method)) {

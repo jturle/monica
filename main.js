@@ -120,6 +120,26 @@ function createPaneInRenderer(connectionId, url) {
   });
 }
 
+// PDF round-trip: proxy intercepts Page.printToPDF → main asks the renderer to
+// run wv.printToPDF() (which works in Electron even though the CDP command is
+// gated by Chromium to headless) and ship back base64.
+let printReqSeq = 0;
+const printResolvers = new Map();
+ipcMain.on("proxy:print-to-pdf-result", (_e, { reqId, base64, error }) => {
+  const r = printResolvers.get(reqId);
+  if (r) { printResolvers.delete(reqId); r({ base64, error }); }
+});
+function printPaneInRenderer(leafId, options) {
+  return new Promise((resolve) => {
+    const reqId = ++printReqSeq;
+    printResolvers.set(reqId, resolve);
+    safeSend("proxy:print-to-pdf", { reqId, leafId, options });
+    setTimeout(() => {
+      if (printResolvers.has(reqId)) { printResolvers.delete(reqId); resolve({ error: "timeout" }); }
+    }, 30000);
+  });
+}
+
 // Safe send to the host renderer. The renderer's frame can be transiently absent
 // (mid-reload, window closing, guest crash propagation) while webContents itself
 // is still truthy — direct .send() then throws "Render frame was disposed before
@@ -139,6 +159,11 @@ const proxyHooks = {
   closePane: (leafId) => safeSend("proxy:close-pane", { leafId }),
   onActivity: (leafId) => safeSend("proxy:activity", { leafId }),
   isPinned: (leafId) => pinned.has(leafId),
+  printToPDF: async (leafId, options) => {
+    const { base64, error } = await printPaneInRenderer(leafId, options);
+    if (error) throw new Error(error);
+    return base64;
+  },
 };
 
 // ---- CDP bind controls -----------------------------------------------------
