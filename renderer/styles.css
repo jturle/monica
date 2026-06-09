@@ -376,6 +376,45 @@ body { display: flex; flex-direction: column; }
   font-size: 11px;
   color: var(--muted);
 }
+.popover .session-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.popover .session-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+  color: var(--text);
+  border-top: 1px solid var(--line);
+}
+.popover .session-row:first-child { border-top: none; }
+.popover .session-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.popover .session-row .lnk {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  padding: 0 2px;
+}
+.popover .session-row .lnk:hover:not(:disabled) { text-decoration: underline; }
+.popover .session-row .lnk:disabled { color: var(--muted); cursor: default; }
+.popover .session-empty {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 4px 0;
+}
 
 /* ---- footer ---- */
 #hint {

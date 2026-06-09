@@ -55,6 +55,7 @@ External agents ── ws ──> :9222 (proxy.js)        ┐
 - `panes` is a flat array; each pane is one `<webview>` and one top-bar pill. There's no per-tab split tree.
 - Two view modes (`viewMode`): **tabs** (selected pane fills the stage) and **grid** (`ceil(sqrt(n))` cells along the window's long axis, transposed in portrait, recomputed on resize). Layout positions absolutely; webviews are never reparented.
 - Panes carry `kind: "user" | "conn"`, optional `session`/`connectionId`, and `autoName` (user-created panes auto-relabel to the page hostname until renamed).
+- **Webview partition**: panes for a NAMED `?session=` connection use `persist:session-<encodeURIComponent(name)>` — cookies / localStorage / IndexedDB persist across reconnects and across monica restarts. Anonymous conn panes and user panes use `persist:pane-<id>` (id is monotonic per launch, so de-facto ephemeral). The named-vs-anonymous bit is plumbed via `proxy.onConnectionOpen(id, label, session)` → renderer's `namedSessionByConn` map → `makePane({namedSession})` → `p.namedSession` → partition selection in `createPaneEl`. Agents can self-clear via standard CDP (`Storage.clearDataForOrigin`, `Network.clearBrowserCookies`); the user clears via the "Persisted sessions" section of the settings popover.
 - The "new tab" blank state is rendered via a **theme-aware data: URI** placeholder (`newTabUrl()`), not `about:blank`. **Keep `p.url` logically `BLANK`** by short-circuiting `setUrl` when it sees `isNewTabUrl(u)` — otherwise omnibox/labels leak the data URI.
 - Activity events (`onProxyActivity`) bump `lastActivity` per pane and pulse the chrome `.dot` for 700ms.
 - The settings popover (gear icon) reads from `getSettings()` and `patchSettings({key:value})` per change.
@@ -70,6 +71,7 @@ Stored under userData. Keys:
 - `closeDelaySeconds`: integer (used when delay mode).
 - `autoCloseStaleMinutes`: integer, `0` = off.
 - `slowMo`: ms, `0` = off.
+- `knownSessions`: array of named `?session=` strings we've seen — populated by `rememberSession()` in `main.js` on `proxy.onConnectionOpen`, so the settings popover can list / clear / forget sessions even when they aren't currently connected.
 
 `SETTINGS_DEFAULTS` and `effectiveSettings()` in `main.js` are the source of truth for sanitisation. Add new keys there.
 

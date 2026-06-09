@@ -70,7 +70,8 @@ let selectedId = null;
 let viewMode = "tabs";
 
 const paneEls = new Map(); // pane id -> .pane element
-const connSessions = new Map(); // connectionId -> session label
+const connSessions = new Map(); // connectionId -> session label (display name; may be synthesized)
+const namedSessionByConn = new Map(); // connectionId -> the *named* ?session= (or absent for anonymous)
 const sessionCounts = new Map(); // session label -> panes created (stable naming)
 const lastActivity = new Map(); // pane id -> Date.now() of last CDP/nav activity
 const pinnedPanes = new Set(); // pane ids the user has pinned (skip auto-close)
@@ -127,7 +128,16 @@ function createPaneEl(p) {
   chrome.querySelector(".ptitle").textContent = isBlank(p.url) ? "new tab" : "";
 
   const wv = document.createElement("webview");
-  wv.setAttribute("partition", "persist:pane-" + p.id); // stable isolation, independent of name
+  // Named ?session= connections get a per-session persistent partition so
+  // cookies / localStorage / IndexedDB survive across reconnects (and across
+  // monica restarts). Anonymous / user panes stay per-pane — those ids are
+  // ephemeral, so de-facto they reset each launch. The user clears named-
+  // session data from the settings popover; the agent can also self-clear via
+  // standard CDP (Storage.clearDataForOrigin, Network.clearBrowserCookies).
+  const partition = p.namedSession
+    ? "persist:session-" + encodeURIComponent(p.namedSession)
+    : "persist:pane-" + p.id;
+  wv.setAttribute("partition", partition);
   wv.setAttribute("allowpopups", "");
   wv.setAttribute("src", isBlank(p.url) ? newTabUrl() : p.url);
 
@@ -190,9 +200,11 @@ function createPaneEl(p) {
   return el;
 }
 
-function makePane({ name, url = BLANK, kind = "user", session = null, connectionId = null, autoName = false }) {
+function makePane({ name, url = BLANK, kind = "user", session = null, namedSession = null, connectionId = null, autoName = false }) {
   // autoName: keep the label in sync with the page hostname until the user renames it.
-  const p = { id: ++paneSeq, name, kind, url, session, connectionId, autoName };
+  // namedSession is set only when the connection used ?session=NAME — that's what
+  // gates the persistent per-session webview partition (see createPaneEl).
+  const p = { id: ++paneSeq, name, kind, url, session, namedSession, connectionId, autoName };
   panes.push(p);
   createPaneEl(p);
   return p;
@@ -506,9 +518,10 @@ omnibox.addEventListener("keydown", (e) => {
 
 // ---- proxy-driven panes (external CDP clients) -----------------------------
 
-window.api?.onProxyConnectionOpen?.(({ connectionId, label }) => {
-  dlog("conn", "open #" + connectionId + " " + label);
+window.api?.onProxyConnectionOpen?.(({ connectionId, label, session }) => {
+  dlog("conn", "open #" + connectionId + " " + label + (session ? " named=" + session : ""));
   connSessions.set(connectionId, label);
+  if (session) namedSessionByConn.set(connectionId, session);
   // Adopt any still-live panes of this session (e.g. a second concurrent client on
   // the same ?session=). Named-session panes are discarded when their connection
   // drops (see proxy.js), so a reconnect after close finds none — by design.
@@ -543,14 +556,17 @@ window.api?.onProxyConnectionClose?.((connectionId) => {
   // dead connection so they behave like normal panes.
   panes.filter((p) => p.connectionId === connectionId).forEach((p) => { p.kind = "user"; p.connectionId = null; });
   connSessions.delete(connectionId);
+  namedSessionByConn.delete(connectionId);
   renderTabs();
 });
 
 window.api?.onProxyCreatePane?.(({ connectionId, url, reqId }) => {
   const session = connSessions.get(connectionId) || "agent";
   if (!connSessions.has(connectionId)) connSessions.set(connectionId, session);
-  dlog("conn", "create-pane #" + connectionId + " session=" + session + " url=" + (url || BLANK));
-  const p = makePane({ name: sessionPaneName(session), url: url || BLANK, kind: "conn", session, connectionId });
+  const namedSession = namedSessionByConn.get(connectionId) || null;
+  dlog("conn", "create-pane #" + connectionId + " session=" + session +
+    (namedSession ? " named=" + namedSession : "") + " url=" + (url || BLANK));
+  const p = makePane({ name: sessionPaneName(session), url: url || BLANK, kind: "conn", session, namedSession, connectionId });
   selectedId = p.id;
   layout(); // size the webview before we hand its id back, so its CDP target isn't 0x0
   select(p.id);
@@ -690,9 +706,58 @@ function applySettingsToForm(s) {
 }
 function patch(key, val) { window.api?.patchSettings?.({ [key]: val }); }
 
+const sessionListEl = document.getElementById("session-list");
+
+// Render the "Persisted sessions" section. Re-runs whenever the popover opens
+// and after a clear/forget so the list reflects current state.
+async function refreshSessionList() {
+  if (!sessionListEl) return;
+  const names = (await window.api?.listSessions?.()) || [];
+  sessionListEl.innerHTML = "";
+  if (!names.length) {
+    const empty = document.createElement("li");
+    empty.className = "session-empty";
+    empty.textContent = "No named sessions yet.";
+    sessionListEl.appendChild(empty);
+    return;
+  }
+  for (const name of names) {
+    const li = document.createElement("li");
+    li.className = "session-row";
+    const lbl = document.createElement("span");
+    lbl.className = "session-name";
+    lbl.textContent = name;
+    const clear = document.createElement("button");
+    clear.className = "lnk";
+    clear.textContent = "Clear";
+    clear.title = "Wipe cookies / localStorage / cache for this session";
+    clear.addEventListener("click", async () => {
+      clear.disabled = true;
+      const res = await window.api?.clearSession?.(name);
+      dlog("session", "clear " + name + " " + JSON.stringify(res || {}));
+      clear.textContent = res?.ok ? "Cleared ✓" : "Failed";
+      setTimeout(() => { clear.textContent = "Clear"; clear.disabled = false; }, 1000);
+    });
+    const forget = document.createElement("button");
+    forget.className = "lnk";
+    forget.textContent = "Forget";
+    forget.title = "Wipe data AND remove from this list";
+    forget.addEventListener("click", async () => {
+      forget.disabled = true;
+      const res = await window.api?.forgetSession?.(name);
+      dlog("session", "forget " + name + " " + JSON.stringify(res || {}));
+      if (res?.ok) refreshSessionList();
+      else { forget.textContent = "Failed"; setTimeout(() => { forget.textContent = "Forget"; forget.disabled = false; }, 1000); }
+    });
+    li.append(lbl, clear, forget);
+    sessionListEl.appendChild(li);
+  }
+}
+
 settingsToggle?.addEventListener("click", (e) => {
   e.stopPropagation();
   settingsPopover.hidden = !settingsPopover.hidden;
+  if (!settingsPopover.hidden) refreshSessionList();
 });
 // Click-outside / Escape close
 document.addEventListener("mousedown", (e) => {

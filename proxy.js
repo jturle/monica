@@ -335,7 +335,10 @@ function openConnection(ctx, fullUrl, req) {
     pendingCloseBySession.delete(session);
     logFn("conn", "cancel pending close for session=" + session);
   }
-  hooks.onConnectionOpen?.(ctx.connectionId, name);
+  // Third arg is the *named* session (or null) so the renderer can decide
+  // whether to give panes a persistent per-session partition; the label arg
+  // above is the human display name (may be a synthesized "host:#n").
+  hooks.onConnectionOpen?.(ctx.connectionId, name, session || null);
 
   if (!session && baseHost !== "localhost") {
     reverseDns(ip, 1000).then((host) => {

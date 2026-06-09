@@ -25,6 +25,11 @@ contextBridge.exposeInMainWorld("api", {
   // Pin / unpin a pane (skip auto-close-stale + close-on-disconnect).
   setPinned: (leafId, isPinned) => ipcRenderer.send("pane:set-pinned", leafId, !!isPinned),
 
+  // Per-named-session persistent storage management.
+  listSessions: () => ipcRenderer.invoke("session:list"),
+  clearSession: (name) => ipcRenderer.invoke("session:clear", name),
+  forgetSession: (name) => ipcRenderer.invoke("session:forget", name),
+
   // Snapshot a pane to ~/Downloads. Renderer ships the webview's webContents id
   // and main does the capturePage (avoids a V8/GPU fatal on the renderer side).
   snapshotPane: (leafId, name, wcId) => ipcRenderer.invoke("pane:snapshot", leafId, name, wcId),

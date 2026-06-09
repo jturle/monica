@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, dialog, clipboard, nativeTheme, webContents } = require("electron");
+const { app, BrowserWindow, Menu, ipcMain, dialog, clipboard, nativeTheme, webContents, session: electronSession } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -184,8 +184,31 @@ function safeSend(channel, payload) {
   try { wc.send(channel, payload); } catch {}
 }
 
+// Named sessions persisted to disk via webview partitions. We remember names
+// across launches so the user can clear data for a session even when it isn't
+// currently connected. Tracked here (not just on disk) because Electron's
+// Partitions/ dir uses an opaque encoding for the partition slug.
+function partitionForSession(name) {
+  return "persist:session-" + encodeURIComponent(name);
+}
+function rememberSession(name) {
+  if (!name || typeof name !== "string") return;
+  const list = Array.isArray(settings.knownSessions) ? settings.knownSessions : [];
+  if (list.includes(name)) return;
+  savePref({ knownSessions: [...list, name] });
+  log("session", "remember " + name);
+}
+function forgetSessionName(name) {
+  const list = Array.isArray(settings.knownSessions) ? settings.knownSessions : [];
+  if (!list.includes(name)) return;
+  savePref({ knownSessions: list.filter((s) => s !== name) });
+}
+
 const proxyHooks = {
-  onConnectionOpen: (connectionId, label) => safeSend("proxy:connection-open", { connectionId, label }),
+  onConnectionOpen: (connectionId, label, session) => {
+    if (session) rememberSession(session);
+    safeSend("proxy:connection-open", { connectionId, label, session });
+  },
   onConnectionLabel: (connectionId, label) => safeSend("proxy:connection-label", { connectionId, label }),
   onConnectionClose: (connectionId) => safeSend("proxy:connection-close", { connectionId }),
   createPane: async (connectionId, url) => ({ leafId: await createPaneInRenderer(connectionId, url) }),
@@ -260,6 +283,46 @@ ipcMain.on("settings:patch", (_e, patch) => {
 // Pin / unpin a pane — pinned panes skip auto-close-stale and close-on-disconnect.
 ipcMain.on("pane:set-pinned", (_e, leafId, isPinned) => {
   if (isPinned) pinned.add(leafId); else pinned.delete(leafId);
+});
+
+// Per-named-session storage:
+//   list   — enumerate names we've persisted (across launches)
+//   clear  — wipe a named session's partition data + cache, keep the name in the list
+//   forget — wipe AND remove the name (the session won't show up again unless it reconnects)
+//
+// The remote agent can also clear its own data via standard CDP commands
+// (Storage.clearDataForOrigin, Network.clearBrowserCookies, …) — those route
+// through the proxy transparently and only affect the session's own partition.
+ipcMain.handle("session:list", () => {
+  return Array.isArray(settings.knownSessions) ? settings.knownSessions.slice() : [];
+});
+async function wipePartition(name) {
+  const sess = electronSession.fromPartition(partitionForSession(name));
+  await sess.clearStorageData();
+  await sess.clearCache();
+}
+ipcMain.handle("session:clear", async (_e, name) => {
+  if (!name || typeof name !== "string") return { error: "missing name" };
+  try {
+    await wipePartition(name);
+    log("session", "clear " + name);
+    return { ok: true };
+  } catch (e) {
+    log("session", "clear " + name + " failed: " + String(e?.message || e));
+    return { error: String(e?.message || e) };
+  }
+});
+ipcMain.handle("session:forget", async (_e, name) => {
+  if (!name || typeof name !== "string") return { error: "missing name" };
+  try {
+    await wipePartition(name);
+    forgetSessionName(name);
+    log("session", "forget " + name);
+    return { ok: true };
+  } catch (e) {
+    log("session", "forget " + name + " failed: " + String(e?.message || e));
+    return { error: String(e?.message || e) };
+  }
 });
 
 // Pane snapshot. We do the capture in MAIN (not the renderer) because
