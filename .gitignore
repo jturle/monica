@@ -17,3 +17,7 @@ out/
 # stray local file, not part of the project
 wow.pdf
 *.pdf
+
+# playwright test artifacts
+test-results/
+playwright-report/

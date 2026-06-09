@@ -15,13 +15,17 @@ const { test, expect, chromium } = require("@playwright/test");
 
 const CDP_ENDPOINT = "http://127.0.0.1:9222?session=playwright-demo";
 
-test("opens example.com in monica then closes the page", async () => {
+test("navigates example.com → wikipedia in monica then closes", async () => {
+  test.setTimeout(20_000); // includes the 5s pause
   const browser = await chromium.connectOverCDP(CDP_ENDPOINT);
-  const context = browser.contexts()[0];      // the default (and only) context
+  const context = browser.contexts()[0];       // the default (and only) context
   const page = await context.newPage();        // → opens a pane in monica
   try {
     await page.goto("https://example.com");
     await expect(page).toHaveTitle(/Example Domain/);
+    await page.waitForTimeout(5000);           // watchable pause
+    await page.goto("https://en.wikipedia.org");
+    await expect(page).toHaveTitle(/Wikipedia/);
   } finally {
     await page.close();                        // Target.closeTarget → pane removed
     await browser.close();                     // disconnects the CDP connection
