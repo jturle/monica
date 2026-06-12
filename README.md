@@ -65,7 +65,13 @@ curl http://localhost:9222/json | jq '.[] | {title, type, url}'
   to copy the URL.
 - **Named, isolated sessions.** A client that connects with `?session=<name>` gets
   its own scoped set of panes — sessions never see or trample each other's pages.
-  Each pane also has its own persistent storage partition.
+  A named session's panes share a persistent storage partition keyed by the
+  session name, so cookies, `localStorage`, and IndexedDB survive reconnects and
+  monica restarts (handy for staying logged in across runs). Anonymous and ⌘T
+  user panes get a per-pane partition that resets each launch. The settings
+  popover lists known sessions with **Clear** (wipe data, keep the name) and
+  **Forget** (wipe + drop) — and agents can self-clear via standard CDP
+  (`Storage.clearDataForOrigin`, `Network.clearBrowserCookies`).
 - **Close means close; disconnect means detach.** Closing a page
   (`Target.closeTarget`) removes its pane. When a *named* session's connection
   drops, monica discards that session's panes. An *anonymous* disconnect (e.g.
@@ -158,8 +164,10 @@ Good to know:
     monica's own shell target from clients,
   - on a named session's disconnect, closes that session's panes (anonymous
     disconnects are left running).
-- **Isolation:** each pane has its own persistent session partition
-  (`persist:pane-<id>`) — separate cookies, storage, and cache.
+- **Isolation:** named-session panes share `persist:session-<name>` so storage
+  carries across reconnects; anonymous and ⌘T user panes use `persist:pane-<id>`
+  (id is per-launch, so de-facto ephemeral). Either way, cookies/storage/cache
+  are scoped to that partition.
 - **Settings:** the Local/LAN bind and the grid/tabs layout are saved in
   `monica-settings.json` and restored on launch.
 
